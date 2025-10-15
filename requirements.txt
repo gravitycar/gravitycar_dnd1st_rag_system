@@ -1,0 +1,22 @@
+# GravityCar D&D 1st Edition RAG System - Core Dependencies
+# Python 3.10+
+
+# Vector Database
+chromadb==1.1.1
+
+# AI/ML Services
+openai==2.3.0
+sentence-transformers==5.1.1
+
+# Configuration Management
+python-dotenv==1.1.1
+
+# PDF to Markdown Conversion
+docling==2.55.1
+docling-core==2.48.4
+docling-ibm-models==3.9.1
+docling-parse==4.5.0
+
+# PDF Processing (optional/experimental)
+PyMuPDF==1.26.4
+pymupdf4llm==0.0.27
