@@ -18,7 +18,7 @@ from typing import List, Dict, Any
 class PlayersHandbookChunker:
     def __init__(self, markdown_file: str, output_file: str = "chunks_players_handbook.json"):
         self.markdown_file = Path(markdown_file)
-        self.output_file = Path(output_file)
+        self.output_file = Path('data/chunks/' + output_file)
         self.chunks: List[Dict[str, Any]] = []
         
     def detect_chunk_type(self, title: str) -> str:

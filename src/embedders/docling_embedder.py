@@ -2,50 +2,60 @@
 """
 Embed chunks from Player's Handbook or Monster Manual into ChromaDB.
 
-Uses all-mpnet-base-v2 for embeddings (768 dimensions).
-Provides better semantic understanding for D&D content.
-Stores rich metadata for each chunk.
-Creates separate collections for each book.
+Uses OpenAI text-embedding-3-small for embeddings (1536 dimensions).
+Prepends statistics to Monster Manual entries for better searchability.
 """
 
 import json
 import chromadb
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 from pathlib import Path
 from typing import List, Dict, Any
 import time
+
+# Import our centralized configuration
+from ..utils.config import get_chroma_connection_params, get_openai_api_key, get_default_collection_name
 
 
 class DoclingEmbedder:
     def __init__(
         self, 
         chunks_file: str, 
-        collection_name: str,
-        chroma_host: str = "localhost",
-        chroma_port: int = 8060
+        collection_name: str = None,
+        chroma_host: str = None,
+        chroma_port: int = None
     ):
         self.chunks_file = Path(chunks_file)
+        
+        # Use default collection name if not provided
+        if collection_name is None:
+            collection_name = get_default_collection_name()
         self.collection_name = collection_name
         
-        print(f"Loading embedding model: all-mpnet-base-v2...")
-        self.model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+        # Get ChromaDB configuration from centralized config utility
+        if chroma_host is None or chroma_port is None:
+            chroma_host, chroma_port = get_chroma_connection_params()
+        
+        # Initialize OpenAI client for embeddings
+        api_key = get_openai_api_key()
+        self.openai_client = OpenAI(api_key=api_key)
+        self.embedding_model_name = "text-embedding-3-small"
+        print(f"Using OpenAI embedding model: {self.embedding_model_name}...")
         
         print(f"Connecting to ChromaDB at {chroma_host}:{chroma_port}...")
         self.client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
         
-        # Delete collection if it exists (fresh start)
+        # Try to get existing collection, create if it doesn't exist
         try:
-            self.client.delete_collection(name=collection_name)
-            print(f"Deleted existing collection: {collection_name}")
+            self.collection = self.client.get_collection(name=collection_name)
+            print(f"Using existing collection: {collection_name}")
         except:
-            pass
-        
-        # Create new collection
-        self.collection = self.client.create_collection(
-            name=collection_name,
-            metadata={"description": f"D&D 1st Edition - {collection_name}"}
-        )
-        print(f"Created collection: {collection_name}")
+            # Collection doesn't exist, create it
+            self.collection = self.client.create_collection(
+                name=collection_name,
+                metadata={"description": f"D&D 1st Edition - {collection_name}"}
+            )
+            print(f"Created new collection: {collection_name}")
     
     def load_chunks(self) -> List[Dict[str, Any]]:
         """Load chunks from JSON file."""
@@ -54,6 +64,19 @@ class DoclingEmbedder:
             chunks = json.load(f)
         print(f"Loaded {len(chunks)} chunks")
         return chunks
+    
+    def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Get embeddings for a batch of texts from OpenAI API."""
+        try:
+            response = self.openai_client.embeddings.create(
+                model=self.embedding_model_name,
+                input=texts,
+                encoding_format="float"
+            )
+            return [item.embedding for item in response.data]
+        except Exception as e:
+            print(f"Error getting embeddings: {e}")
+            raise
     
     def embed_chunks(self, chunks: List[Dict[str, Any]], batch_size: int = 32):
         """Embed chunks and store in ChromaDB."""
@@ -90,7 +113,7 @@ class DoclingEmbedder:
                 texts.append(text)
             
             # Generate embeddings
-            embeddings = self.model.encode(texts, show_progress_bar=False)
+            embeddings = self.get_embeddings_batch(texts)
             
             # Prepare data for ChromaDB
             ids = []
@@ -147,7 +170,7 @@ class DoclingEmbedder:
             # Add to ChromaDB
             self.collection.add(
                 ids=ids,
-                embeddings=embeddings.tolist(),
+                embeddings=embeddings,
                 metadatas=metadatas,
                 documents=documents
             )
@@ -163,11 +186,11 @@ class DoclingEmbedder:
         print(f"{'='*80}")
         
         # Embed the query
-        query_embedding = self.model.encode([query])[0]
+        query_embedding = self.get_embeddings_batch([query])[0]
         
         # Search
         results = self.collection.query(
-            query_embeddings=[query_embedding.tolist()],
+            query_embeddings=[query_embedding],
             n_results=n_results
         )
         
@@ -199,6 +222,27 @@ class DoclingEmbedder:
         
         print(f"\n{'='*80}\n")
     
+    def truncate_collection(self):
+        """Delete all entries in the collection without deleting the collection itself."""
+        print(f"\nTruncating collection: {self.collection_name}")
+        
+        # Get all IDs from the collection
+        all_results = self.collection.get()
+        
+        if not all_results['ids']:
+            print("Collection is already empty.")
+            return
+        
+        count = len(all_results['ids'])
+        print(f"Found {count} entries to delete...")
+        
+        # Delete all entries
+        self.collection.delete(ids=all_results['ids'])
+        
+        # Verify deletion
+        remaining = self.collection.count()
+        print(f"✅ Truncated collection. Remaining entries: {remaining}")
+    
     def process(self):
         """Main processing pipeline."""
         chunks = self.load_chunks()
@@ -209,6 +253,15 @@ def main():
     import sys
     import argparse
     
+    # Get defaults from config
+    try:
+        default_host, default_port = get_chroma_connection_params()
+        default_collection = get_default_collection_name()
+    except Exception:
+        # Fallback if config fails
+        default_host, default_port = "localhost", 8060
+        default_collection = "adnd_1e"
+    
     parser = argparse.ArgumentParser(
         description="Embed D&D 1st Edition book chunks into ChromaDB"
     )
@@ -217,24 +270,20 @@ def main():
         help="Path to chunks JSON file (e.g., chunks_players_handbook.json)"
     )
     parser.add_argument(
-        "collection_name",
-        help="ChromaDB collection name (e.g., dnd_players_handbook)"
-    )
-    parser.add_argument(
         "--test-query",
         help="Optional test query to run after embedding",
         default=None
     )
     parser.add_argument(
         "--host",
-        default="localhost",
-        help="ChromaDB host (default: localhost)"
+        default=default_host,
+        help=f"ChromaDB host (default from .env: {default_host})"
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=8060,
-        help="ChromaDB port (default: 8060)"
+        default=default_port,
+        help=f"ChromaDB port (default from .env: {default_port})"
     )
     
     args = parser.parse_args()
@@ -245,7 +294,6 @@ def main():
     
     embedder = DoclingEmbedder(
         chunks_file=args.chunks_file,
-        collection_name=args.collection_name,
         chroma_host=args.host,
         chroma_port=args.port
     )
@@ -256,11 +304,9 @@ def main():
     if args.test_query:
         embedder.test_query(args.test_query)
     else:
-        # Run default test queries based on collection type
-        if "player" in args.collection_name.lower():
-            embedder.test_query("How many experience points does a fighter need for 9th level?")
-        elif "monster" in args.collection_name.lower():
-            embedder.test_query("Tell me about demons and their abilities")
+        # Run default test queries for unified collection
+        embedder.test_query("How many experience points does a fighter need for 9th level?")
+        embedder.test_query("Tell me about demons and their abilities")
 
 
 if __name__ == "__main__":

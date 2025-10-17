@@ -7,44 +7,47 @@ Supports both Player's Handbook and Monster Manual collections.
 """
 
 import chromadb
-from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from pathlib import Path
 import os
-from dotenv import load_dotenv
 import argparse
 import sys
+
+# Import our centralized configuration
+from ..utils.config import get_chroma_connection_params, get_openai_api_key, get_default_collection_name
 
 
 class DnDRAG:
     def __init__(
         self,
-        collection_name: str,
+        collection_name: str = None,
         model: str = "gpt-4o-mini",
-        chroma_host: str = "localhost",
-        chroma_port: int = 8060
+        chroma_host: str = None,
+        chroma_port: int = None
     ):
+        # Use default collection name if not provided
+        if collection_name is None:
+            collection_name = get_default_collection_name()
         self.collection_name = collection_name
         self.model = model
         
-        # Load environment variables
-        load_dotenv()
-        api_key = os.getenv("gravitycar_openai_api_key")
-        if not api_key:
-            raise ValueError(
-                "OpenAI API key not found. Please set 'gravitycar_openai_api_key' in .env file"
-            )
+        # Get configuration from centralized config utility
+        if chroma_host is None or chroma_port is None:
+            chroma_host, chroma_port = get_chroma_connection_params()
+        
+        api_key = get_openai_api_key()
         
         print(f"Initializing D&D RAG system...")
         print(f"  Collection: {collection_name}")
         print(f"  Model: {model}")
+        print(f"  ChromaDB: {chroma_host}:{chroma_port}")
         
         # Initialize OpenAI client
         self.openai_client = OpenAI(api_key=api_key)
         
-        # Initialize embedding model (must match the model used for embedding)
-        print(f"  Loading embedding model...")
-        self.embedding_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+        # Set OpenAI embedding model (must match the model used for embedding)
+        self.embedding_model_name = "text-embedding-3-small"
+        print(f"  Using OpenAI embedding model: {self.embedding_model_name}")
         
         # Connect to ChromaDB
         print(f"  Connecting to ChromaDB...")
@@ -58,7 +61,20 @@ class DnDRAG:
             print(f"     Available collections: {[c.name for c in self.chroma_client.list_collections()]}")
             raise
     
-    def retrieve(self, query: str, k: int = 5, distance_threshold: float = 0.4, debug: bool = False):
+    def get_embedding(self, text: str):
+        """Get embedding from OpenAI API."""
+        try:
+            response = self.openai_client.embeddings.create(
+                model=self.embedding_model_name,
+                input=text,
+                encoding_format="float"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            print(f"Error getting embedding: {e}")
+            raise
+    
+    def retrieve(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False):
         """Retrieve top-k relevant chunks from ChromaDB with entity-aware enhancement.
         
         Args:
@@ -69,7 +85,7 @@ class DnDRAG:
             debug: If True, print detailed gap detection info
         """
         # Embed the query
-        query_embedding = self.embedding_model.encode([query])[0]
+        query_embedding = self.get_embedding(query)
         
         # Smart enhancement: Detect if query mentions multiple specific entities
         # Common comparison patterns: "compare X and Y", "X vs Y", "X versus Y", "differences between X and Y"
@@ -102,7 +118,7 @@ class DnDRAG:
         
         # Search
         results = self.collection.query(
-            query_embeddings=[query_embedding.tolist()],
+            query_embeddings=[query_embedding],
             n_results=expanded_k
         )
         
@@ -176,7 +192,7 @@ class DnDRAG:
             if missing_entities:
                 for entity in missing_entities:
                     entity_results = self.collection.query(
-                        query_embeddings=[self.embedding_model.encode([entity])[0].tolist()],
+                        query_embeddings=[self.get_embedding(entity)],
                         n_results=1
                     )
                     if entity_results['ids'][0]:
@@ -344,7 +360,7 @@ Answer based on the context above:"""
         
         return response.choices[0].message.content
     
-    def query(self, question: str, k: int = 5, distance_threshold: float = 0.4, show_context: bool = False, debug: bool = False):
+    def query(self, question: str, k: int = 15, distance_threshold: float = 0.4, show_context: bool = False, debug: bool = False):
         """Full RAG pipeline: retrieve + generate."""
         print(f"\n{'='*80}")
         print(f"QUESTION: {question}")
@@ -391,10 +407,6 @@ def main():
         description="Query D&D 1st Edition RAG system"
     )
     parser.add_argument(
-        "collection",
-        help="ChromaDB collection name (e.g., dnd_players_handbook, dnd_monster_manual)"
-    )
-    parser.add_argument(
         "query",
         nargs="?",
         help="Question to ask (if not provided, enters interactive mode)"
@@ -407,8 +419,8 @@ def main():
     parser.add_argument(
         "-k",
         type=int,
-        default=5,
-        help="Maximum number of chunks to retrieve (default: 5)"
+        default=15,
+        help="Maximum number of chunks to retrieve (default: 15)"
     )
     parser.add_argument(
         "--distance-threshold",
@@ -437,7 +449,6 @@ def main():
     # Initialize RAG system
     try:
         rag = DnDRAG(
-            collection_name=args.collection,
             model=args.model
         )
     except Exception as e:
@@ -446,21 +457,16 @@ def main():
     
     # Test mode
     if args.test:
-        if "player" in args.collection.lower() or "handbook" in args.collection.lower():
-            test_questions = [
-                "How many experience points does a fighter need to reach 9th level?",
-                "What are the unique abilities that only thieves have?",
-                "What are the six character abilities in D&D?"
-            ]
-        else:  # Monster manual
-            test_questions = [
-                "Tell me about owlbears and their abilities",
-                "What is the difference between a red dragon and a white dragon?",
-                "What are lizard men and how dangerous are they?"
-            ]
+        # Use unified collection tests for both books
+        test_questions = [
+            "How many experience points does a fighter need to reach 9th level?",
+            "Tell me about owlbears and their abilities",
+            "What is the difference between a red dragon and a white dragon?",
+            "What are the six character abilities in D&D?"
+        ]
         
         print(f"\n{'*'*80}")
-        print(f"RUNNING TEST QUESTIONS FOR {args.collection}")
+        print(f"RUNNING TEST QUESTIONS FOR UNIFIED COLLECTION")
         print(f"{'*'*80}\n")
         
         for i, question in enumerate(test_questions, 1):
@@ -484,7 +490,7 @@ def main():
     print("INTERACTIVE MODE")
     print(f"{'='*80}")
     print("Enter your questions (or 'quit' to exit)")
-    print(f"Using collection: {args.collection}")
+    print(f"Using unified D&D 1st Edition collection")
     print(f"Retrieving k={args.k} chunks per query")
     print(f"{'='*80}\n")
     
