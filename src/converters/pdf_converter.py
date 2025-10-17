@@ -25,8 +25,8 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.backend.pdf_backend import PdfPageBackend
 from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions, TesseractOcrOptions, TableFormerMode
-from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
-
+from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
+from docling.backend.pdf_backend import PdfDocumentBackend
 
 import time
 
@@ -52,7 +52,7 @@ def get_docling_converter(pipeline_options):
         format_options={
             InputFormat.PDF: PdfFormatOption(
                 pipeline_options=pipeline_options,
-                backend=PyPdfiumDocumentBackend
+                backend=DoclingParseV4DocumentBackend
                 )
         }
     )
