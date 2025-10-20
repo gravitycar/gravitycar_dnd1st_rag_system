@@ -27,6 +27,7 @@ from gravitycar_dnd1st_rag_system.chunkers.players_handbook import PlayersHandbo
 from gravitycar_dnd1st_rag_system.embedders.docling_embedder import DoclingEmbedder
 from gravitycar_dnd1st_rag_system.query.docling_query import DnDRAG
 from gravitycar_dnd1st_rag_system.utils.config import get_chroma_connection_params
+from gravitycar_dnd1st_rag_system.preprocessors.heading_organizer import HeadingOrganizer
 
 
 def cmd_convert(args):
@@ -34,6 +35,35 @@ def cmd_convert(args):
     print(f"Converting PDF: {args.pdf_file}")
     # TODO: Implement PDFConverter call
     print("PDF conversion not yet integrated into main.py")
+
+
+def cmd_organize(args):
+    """Organize heading hierarchy in markdown file."""
+    markdown_file = Path(args.markdown_file)
+    
+    if not markdown_file.exists():
+        print(f"Error: File not found: {markdown_file}")
+        sys.exit(1)
+    
+    # Auto-detect TOC file if not specified
+    toc_file = args.toc
+    if not toc_file:
+        # Look for TOC in data/source_pdfs/notes/
+        possible_toc = Path('data/source_pdfs/notes/Players_Handbook_TOC.txt')
+        if possible_toc.exists():
+            toc_file = str(possible_toc)
+        else:
+            print("Error: Could not auto-detect TOC file. Please specify with --toc")
+            sys.exit(1)
+    
+    organizer = HeadingOrganizer(
+        markdown_file=str(markdown_file),
+        toc_file=toc_file,
+        output_file=args.output,
+        create_backup=not args.no_backup,
+        debug=args.debug
+    )
+    organizer.process()
 
 
 def cmd_chunk(args):
@@ -209,6 +239,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  python main.py convert data/source_pdfs/Players_Handbook.pdf
+  python main.py organize data/markdown/Players_Handbook_(1e).md
   python main.py chunk data/markdown/Monster_Manual.md --type monster
   python main.py embed data/chunks/chunks_Monster_Manual.json dnd_monster_manual_openai
   python main.py query dnd_monster_manual_openai "What is a beholder?"
@@ -222,6 +254,14 @@ Examples:
     # Convert command
     convert_parser = subparsers.add_parser('convert', help='Convert PDF to markdown')
     convert_parser.add_argument('pdf_file', help='PDF file to convert')
+    
+    # Organize command
+    organize_parser = subparsers.add_parser('organize', help='Organize heading hierarchy')
+    organize_parser.add_argument('markdown_file', help='Markdown file to organize')
+    organize_parser.add_argument('--toc', default=None, help='Path to Table of Contents file')
+    organize_parser.add_argument('--output', default=None, help='Output file path')
+    organize_parser.add_argument('--no-backup', action='store_true', help='Skip backup creation')
+    organize_parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     
     # Chunk command
     chunk_parser = subparsers.add_parser('chunk', help='Chunk markdown documents')
@@ -265,6 +305,7 @@ Examples:
     # Route to appropriate command handler
     command_handlers = {
         'convert': cmd_convert,
+        'organize': cmd_organize,
         'chunk': cmd_chunk,
         'embed': cmd_embed,
         'truncate': cmd_truncate,
