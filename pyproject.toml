@@ -40,6 +40,7 @@ dev = [
 
 [project.scripts]
 dnd-convert = "gravitycar_dnd1st_rag_system.cli:convert_main"
+dnd-organize = "gravitycar_dnd1st_rag_system.cli:organize_main"
 dnd-chunk = "gravitycar_dnd1st_rag_system.cli:chunk_main"
 dnd-embed = "gravitycar_dnd1st_rag_system.cli:embed_main"
 dnd-truncate = "gravitycar_dnd1st_rag_system.cli:truncate_main"

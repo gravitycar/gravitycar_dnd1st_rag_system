@@ -3,6 +3,7 @@ dnd-chunk = gravitycar_dnd1st_rag_system.cli:chunk_main
 dnd-convert = gravitycar_dnd1st_rag_system.cli:convert_main
 dnd-embed = gravitycar_dnd1st_rag_system.cli:embed_main
 dnd-list = gravitycar_dnd1st_rag_system.cli:list_main
+dnd-organize = gravitycar_dnd1st_rag_system.cli:organize_main
 dnd-query = gravitycar_dnd1st_rag_system.cli:query_main
 dnd-rag = gravitycar_dnd1st_rag_system.cli:main
 dnd-truncate = gravitycar_dnd1st_rag_system.cli:truncate_main

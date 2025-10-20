@@ -14,6 +14,7 @@ from typing import Optional
 from .converters.pdf_converter import convert_pdfs_to_markdown, inspect_markdown_sample
 from .chunkers.monster_encyclopedia import MonsterEncyclopediaChunker
 from .chunkers.players_handbook import PlayersHandbookChunker
+from .preprocessors.heading_organizer import HeadingOrganizer
 from .embedders.docling_embedder import DoclingEmbedder
 from .query.docling_query import DnDRAG
 from .utils.config import get_chroma_connection_params, get_default_collection_name
@@ -50,6 +51,51 @@ def convert_main():
         inspect_markdown_sample(args.output_dir)
     
     print(f"✅ PDF conversion complete: {args.output_dir}")
+
+
+def organize_main():
+    """Entry point for dnd-organize command."""
+    parser = argparse.ArgumentParser(description="Organize heading hierarchy in markdown")
+    parser.add_argument('markdown_file', help='Markdown file to organize')
+    parser.add_argument('--toc', default=None,
+                       help='Path to Table of Contents file (auto-detected if not specified)')
+    parser.add_argument('--output', default=None,
+                       help='Output file path (default: <input>_organized.md)')
+    parser.add_argument('--no-backup', action='store_true',
+                       help='Do not create backup of input file')
+    parser.add_argument('--debug', action='store_true',
+                       help='Enable debug output')
+    
+    args = parser.parse_args()
+    
+    markdown_file = Path(args.markdown_file)
+    
+    if not markdown_file.exists():
+        print(f"Error: File not found: {markdown_file}")
+        sys.exit(1)
+    
+    # Auto-detect TOC file if not specified
+    toc_file = args.toc
+    if not toc_file:
+        possible_toc = Path('data/source_pdfs/notes/Players_Handbook_TOC.txt')
+        if possible_toc.exists():
+            toc_file = str(possible_toc)
+        else:
+            print("Error: Could not auto-detect TOC file. Please specify with --toc")
+            sys.exit(1)
+    
+    print(f"Organizing headings: {markdown_file}")
+    
+    organizer = HeadingOrganizer(
+        markdown_file=str(markdown_file),
+        toc_file=toc_file,
+        output_file=args.output,
+        create_backup=not args.no_backup,
+        debug=args.debug
+    )
+    organizer.process()
+    
+    print(f"✅ Heading organization complete")
 
 
 def chunk_main():
