@@ -157,9 +157,11 @@ except Exception as e:
 
 1. `src/query/docling_query.py` - The "brain" (entity detection, gap detection, OpenAI integration)
 2. `src/chunkers/monster_encyclopedia.py` - Category detection logic (DEMON → nested monsters)
-3. `src/embedders/docling_embedder.py` - Metadata flattening, statistics prepending
-4. `docs/implementations/adaptive_filtering.md` - Gap detection algorithm explained with examples
-5. `.env` - Configuration source of truth (ChromaDB host/port, OpenAI key)
+3. `src/chunkers/recursive_chunker.py` - **NEW**: Hierarchical chunker with spell detection and adaptive splitting
+4. `src/embedders/docling_embedder.py` - Metadata flattening, statistics prepending
+5. `docs/implementations/adaptive_filtering.md` - Gap detection algorithm explained with examples
+6. `docs/implementations/recursive_chunker_implementation.md` - **NEW**: Recursive chunker implementation details
+7. `.env` - Configuration source of truth (ChromaDB host/port, OpenAI key)
 
 ## Testing Philosophy
 
