@@ -381,6 +381,251 @@ class HeadingRewriter:
         return self.output_lines
 
 
+class InsanityTransformer:
+    """Transforms insanity type descriptions into proper headings."""
+    
+    # Pattern to detect insanity descriptions at start of line
+    # Matches lines starting with: <number(s) with optional spaces/periods>. <Insanity Name>: 
+    # Examples: "1. Dipsomania:", "13. Paranoia:", "3. 1 3. Paranoia:" (malformed in PDF)
+    # The pattern captures everything up to the insanity name
+    INSANITY_PATTERN = re.compile(r'^([\d\s\.]+)\s+([A-Za-z\s\-]+):\s+(.*)$')
+    
+    def __init__(self, debug: bool = False):
+        """
+        Initialize insanity transformer.
+        
+        Args:
+            debug: Enable debug logging
+        """
+        self.debug = debug
+        self.transformation_count = 0
+        self.in_insanity_section = False
+    
+    def _extract_number(self, number_str: str) -> str:
+        """
+        Extract the actual number from potentially malformed number strings.
+        
+        Examples:
+            "1." → "1"
+            "13." → "13"
+            "3. 1 3." → "13" (OCR error: extra "3. " prefix)
+        
+        Args:
+            number_str: Raw number string from regex capture
+            
+        Returns:
+            Cleaned number string
+        """
+        # Handle malformed pattern like "3. 1 3." where there's a spurious "3. " prefix
+        # Look for pattern: <digit>. <space> <actual number with optional spaces>
+        malformed_match = re.search(r'^\d+\.\s+(\d+(?:\s+\d+)?)', number_str)
+        if malformed_match:
+            # Found malformed pattern - extract the actual number after first period
+            # Remove any spaces within the number (e.g., "1 3" → "13")
+            return malformed_match.group(1).replace(' ', '')
+        
+        # Simple case: just a number followed by period
+        simple_match = re.match(r'^(\d+)', number_str)
+        if simple_match:
+            return simple_match.group(1)
+        
+        # Fallback: strip periods and spaces
+        return number_str.strip('. ')
+    
+    def transform_insanity_types(self, lines: List[str]) -> List[str]:
+        """
+        Transform insanity type descriptions into level 4 headings.
+        
+        Processes lines in the INSANITY section, converting patterns like:
+            1. Dipsomania: <description...>
+        to:
+            #### 1. Dipsomania:
+            <description...>
+        
+        Args:
+            lines: List of lines to process
+            
+        Returns:
+            List of transformed lines
+        """
+        output_lines = []
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Track when we enter the INSANITY section (### level)
+            if line.startswith('### ') and 'INSANITY' in line:
+                self.in_insanity_section = True
+                if self.debug:
+                    print(f"  → Entered INSANITY section at line {i}")
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Exit INSANITY section when we hit next level 2 or 3 heading
+            if self.in_insanity_section and (line.startswith('## ') or line.startswith('### ')):
+                self.in_insanity_section = False
+                if self.debug:
+                    print(f"  → Exited INSANITY section at line {i}")
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Only transform in INSANITY section
+            if not self.in_insanity_section:
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Check if current line matches the insanity description pattern
+            # (Don't require blank line before - entries run together in original)
+            match = self.INSANITY_PATTERN.match(stripped)
+            if match:
+                number_raw = match.group(1).strip()
+                number = self._extract_number(number_raw)
+                insanity_name = match.group(2).strip()
+                description_start = match.group(3).strip()
+                
+                # If previous line isn't blank, add one before the heading
+                if len(output_lines) > 0 and output_lines[-1].strip() != '':
+                    output_lines.append('\n')
+                
+                # Transform: <num>. <Name>: <desc> → #### <num>. <Name>:\n<desc>
+                output_lines.append(f'#### {number}. {insanity_name}:\n')
+                if description_start:
+                    output_lines.append(f'{description_start}\n')
+                
+                self.transformation_count += 1
+                if self.debug:
+                    print(f"  → Transformed insanity: {number}. {insanity_name}")
+                
+                i += 1
+                continue
+            
+            # No match, pass through unchanged
+            output_lines.append(line)
+            i += 1
+        
+        return output_lines
+
+
+class MagicItemTransformer:
+    """Transforms magic item descriptions into proper headings."""
+    
+    # Pattern to detect magic item names at start of line
+    # Matches lines starting with: Capital letter followed by text and a colon
+    # Examples: "Delusion:", "Animal Control:", "Extra-Healing:"
+    ITEM_NAME_PATTERN = re.compile(r'^([A-Z][A-Za-z\s\-\']+):\s+(.*)$')
+    
+    def __init__(self, debug: bool = False):
+        """
+        Initialize magic item transformer.
+        
+        Args:
+            debug: Enable debug logging
+        """
+        self.debug = debug
+        self.transformation_count = 0
+        self.in_magic_items_section = False
+        self.in_subsection = False  # Track if we're in a subsection like "#### POTIONS"
+    
+    def transform_magic_items(self, lines: List[str]) -> List[str]:
+        """
+        Transform magic item descriptions into level 5 headings.
+        
+        Processes lines in the EXPLANATIONS AND DESCRIPTIONS OF MAGIC ITEMS section,
+        converting patterns like:
+            <Item Name>: <description...>
+        to:
+            ##### <Item Name>
+            <description...>
+        
+        Only transforms items within subsections (after #### headings like POTIONS, SCROLLS, etc.)
+        
+        Args:
+            lines: List of lines to process
+            
+        Returns:
+            List of transformed lines
+        """
+        output_lines = []
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Track when we enter the magic items section
+            if 'EXPLANATIONS AND DESCRIPTIONS OF MAGIC ITEMS' in line:
+                self.in_magic_items_section = True
+                if self.debug:
+                    print(f"  → Entered MAGIC ITEMS section at line {i}")
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Track when we enter a subsection like "#### POTIONS"
+            if self.in_magic_items_section and line.startswith('#### '):
+                self.in_subsection = True
+                if self.debug:
+                    print(f"  → Entered subsection: {stripped}")
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Exit magic items section when we hit next major/minor section (but not #### subsections)
+            if self.in_magic_items_section and (line.startswith('## ') or line.startswith('### ')):
+                self.in_magic_items_section = False
+                self.in_subsection = False
+                if self.debug:
+                    print(f"  → Exited MAGIC ITEMS section at line {i}")
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Only transform in magic items subsections
+            if not self.in_magic_items_section or not self.in_subsection:
+                output_lines.append(line)
+                i += 1
+                continue
+            
+            # Check if current line matches the item name pattern
+            # Must have a blank line before it (previous output line is blank)
+            has_blank_before = len(output_lines) > 0 and output_lines[-1].strip() == ''
+            
+            if self.debug and has_blank_before and stripped and not line.startswith('#'):
+                match_test = self.ITEM_NAME_PATTERN.match(stripped)
+                if match_test:
+                    print(f"  Line {i}: Potential item - '{stripped[:50]}...'")
+                    print(f"    in_magic_items={self.in_magic_items_section}, in_subsection={self.in_subsection}")
+            
+            if has_blank_before:
+                match = self.ITEM_NAME_PATTERN.match(stripped)
+                if match:
+                    item_name = match.group(1).strip()
+                    description_start = match.group(2).strip()
+                    
+                    # Transform: <Item Name>: <desc> → ##### <Item Name>\n<desc>
+                    output_lines.append(f'##### {item_name}\n')
+                    if description_start:
+                        output_lines.append(f'{description_start}\n')
+                    
+                    self.transformation_count += 1
+                    if self.debug:
+                        print(f"  → Transformed item: {item_name}")
+                    
+                    i += 1
+                    continue
+            
+            # No match, pass through unchanged
+            output_lines.append(line)
+            i += 1
+        
+        return output_lines
+
+
 class HeadingOrganizer:
     """Main orchestrator for heading reorganization."""
     
@@ -421,6 +666,8 @@ class HeadingOrganizer:
         
         self.state_machine = StateMachine(self.toc_parser)
         self.heading_rewriter = HeadingRewriter(self.state_machine, debug=debug)
+        self.insanity_transformer = InsanityTransformer(debug=debug)
+        self.magic_item_transformer = MagicItemTransformer(debug=debug)
     
     def process(self) -> None:
         """Main processing pipeline."""
@@ -434,6 +681,7 @@ class HeadingOrganizer:
         
         print(f"Processing {len(lines)} lines...")
         
+        # Phase 1: Reorganize headings
         for line_num, line in enumerate(lines, 1):
             self.heading_rewriter.process_line(line, line_num)
             
@@ -441,24 +689,41 @@ class HeadingOrganizer:
             if line_num % 1000 == 0:
                 print(f"  Processed {line_num}/{len(lines)} lines...")
         
+        # Phase 2: Transform insanity and magic item descriptions (DMG only)
+        output_lines = self.heading_rewriter.get_output()
+        if 'Dungeon_Master' in self.markdown_file.name or 'DMG' in self.markdown_file.name:
+            print(f"\nTransforming insanity type descriptions...")
+            output_lines = self.insanity_transformer.transform_insanity_types(output_lines)
+            
+            print(f"\nTransforming magic item descriptions...")
+            output_lines = self.magic_item_transformer.transform_magic_items(output_lines)
+        
+        # Write output
         print(f"\nWriting output to {self.output_file}...")
-        self._write_output()
+        self._write_output(output_lines)
         
         print(f"\nValidating output...")
         self._validate_output(len(lines))
         
         print(f"\n✅ Heading organization complete!")
-        print(f"   Transformations: {self.heading_rewriter.transformation_count}")
+        print(f"   Heading transformations: {self.heading_rewriter.transformation_count}")
+        if hasattr(self, 'insanity_transformer') and self.insanity_transformer.transformation_count > 0:
+            print(f"   Insanity type transformations: {self.insanity_transformer.transformation_count}")
+        if hasattr(self, 'magic_item_transformer') and self.magic_item_transformer.transformation_count > 0:
+            print(f"   Magic item transformations: {self.magic_item_transformer.transformation_count}")
         self._print_statistics()
     
-    def _write_output(self) -> None:
-        """Write transformed lines to output file."""
+    def _write_output(self, output_lines: List[str]) -> None:
+        """
+        Write transformed lines to output file.
+        
+        Args:
+            output_lines: Lines to write
+        """
         if self.create_backup and self.output_file.exists():
             backup_file = self.output_file.with_suffix('.md.bak')
             print(f"  Creating backup: {backup_file}")
             self.output_file.rename(backup_file)
-        
-        output_lines = self.heading_rewriter.get_output()
         
         # Ensure parent directory exists
         self.output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -471,22 +736,52 @@ class HeadingOrganizer:
         Validate output file.
         
         Args:
-            expected_line_count: Expected number of lines
+            expected_line_count: Expected number of lines before transformations
         """
         with open(self.output_file, 'r', encoding='utf-8') as f:
             output_lines = f.readlines()
         
-        if len(output_lines) != expected_line_count:
-            raise ValueError(
-                f"Line count mismatch! Expected {expected_line_count}, "
-                f"got {len(output_lines)}"
-            )
+        actual_count = len(output_lines)
         
-        print(f"  ✓ Line count correct: {expected_line_count}")
+        # Calculate total transformations from all transformers
+        total_transformations = 0
+        transform_details = []
+        
+        # Insanity transformations add 2 lines each (blank line + heading split)
+        if hasattr(self, 'insanity_transformer') and self.insanity_transformer.transformation_count > 0:
+            insanity_additions = self.insanity_transformer.transformation_count * 2
+            total_transformations += insanity_additions
+            transform_details.append(f"{self.insanity_transformer.transformation_count} insanity ({insanity_additions} lines)")
+        
+        # Magic item transformations add 1 line each (heading split)
+        if hasattr(self, 'magic_item_transformer') and self.magic_item_transformer.transformation_count > 0:
+            total_transformations += self.magic_item_transformer.transformation_count
+            transform_details.append(f"{self.magic_item_transformer.transformation_count} magic item")
+        
+        # If transformations occurred, line count will increase
+        # (each transformation adds 1 line: item/insanity name becomes heading + description)
+        if total_transformations > 0:
+            expected_with_transforms = expected_line_count + total_transformations
+            if actual_count != expected_with_transforms:
+                print(f"  ⚠ Line count: expected {expected_with_transforms} "
+                      f"(original {expected_line_count} + {total_transformations} transformations), "
+                      f"got {actual_count}")
+            else:
+                detail_str = " + ".join(transform_details)
+                print(f"  ✓ Line count correct: {actual_count} "
+                      f"(original {expected_line_count} + {detail_str} transformations)")
+        else:
+            if actual_count != expected_line_count:
+                raise ValueError(
+                    f"Line count mismatch! Expected {expected_line_count}, "
+                    f"got {actual_count}"
+                )
+            print(f"  ✓ Line count correct: {expected_line_count}")
     
     def _print_statistics(self) -> None:
         """Print statistics about heading transformations."""
-        output_lines = self.heading_rewriter.get_output()
+        with open(self.output_file, 'r', encoding='utf-8') as f:
+            output_lines = f.readlines()
         
         heading_counts = {}
         for line in output_lines:
