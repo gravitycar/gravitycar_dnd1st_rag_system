@@ -40,6 +40,8 @@ Before implementing a solution, take the time to fully understand the problem, a
 ## Implementation Plan
 The implementation plan for the new feature will be developed in several stages, ensuring a comprehensive approach to design, development, and testing.
 
+Write your implmentation plan to docs/implementation_plans. Give it a concise but descriptive title.
+
 1. **Feature Overview**
    - Describe the feature and its purpose within the Gravitycar D&D RAG System.
 
