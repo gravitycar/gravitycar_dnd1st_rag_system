@@ -15,9 +15,10 @@ from .converters.pdf_converter import convert_pdfs_to_markdown, inspect_markdown
 from .chunkers.monster_encyclopedia import MonsterEncyclopediaChunker
 from .chunkers.players_handbook import PlayersHandbookChunker
 from .preprocessors.heading_organizer import HeadingOrganizer
-from .embedders.docling_embedder import DoclingEmbedder
+from .embedders.embedder_orchestrator import EmbedderOrchestrator
 from .query.docling_query import DnDRAG
-from .utils.config import get_chroma_connection_params, get_default_collection_name
+from .utils.config import get_default_collection_name
+from .utils.chromadb_connector import ChromaDBConnector
 
 
 def convert_main():
@@ -154,21 +155,30 @@ def embed_main():
     
     print(f"Embedding chunks: {chunks_file} → unified collection")
     
-    embedder = DoclingEmbedder(
-        chunks_file=str(chunks_file)
+    # Use orchestrator for automatic format detection
+    orchestrator = EmbedderOrchestrator()
+    
+    # Get default collection name
+    collection_name = get_default_collection_name()
+    
+    embedder = orchestrator.process(
+        chunk_file=str(chunks_file),
+        collection_name=collection_name,
+        truncate=False
     )
     
-    chunks = embedder.load_chunks()
-    embedder.embed_chunks(chunks)
-    
-    # Run test query if requested
+    # Run test queries if requested
     if args.test or args.test_query:
-        test_query = args.test_query
-        if not test_query:
-            # Use unified collection tests
-            test_query = "What are the six character abilities?"
-        
-        embedder.test_query(test_query)
+        if args.test_query:
+            # Custom test query
+            results = embedder.test_query(collection_name, args.test_query, k=5)
+            print(f"\nTest query: {args.test_query}")
+            for i, result in enumerate(results, 1):
+                print(f"\n{i}. Distance: {result['distance']:.4f}")
+                print(f"   Content: {result['document'][:200]}...")
+        else:
+            # Use default test queries
+            orchestrator.run_test_queries(embedder, collection_name)
 
 
 def truncate_main():
@@ -202,20 +212,16 @@ def truncate_main():
             print("Truncation cancelled.")
             sys.exit(0)
     
-    # Create a dummy embedder just to get access to the collection
-    # We need a chunks file argument but won't use it for truncation
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        f.write('[]')
-        temp_file = f.name
+    # Use ChromaDB connector to truncate collection
+    chroma = ChromaDBConnector()
     
     try:
-        embedder = DoclingEmbedder(chunks_file=temp_file)
-        embedder.truncate_collection()
-    finally:
-        # Clean up temp file
-        import os
-        os.unlink(temp_file)
+        count_deleted = chroma.truncate_collection(collection_name)
+        print(f"✅ Truncated collection '{collection_name}' ({count_deleted} entries deleted)")
+    except Exception as e:
+        print(f"Error: Could not truncate collection '{collection_name}'")
+        print(f"Details: {e}")
+        sys.exit(1)
 
 
 def query_main():
@@ -286,12 +292,8 @@ def list_main():
     
     args = parser.parse_args()
     
-    import chromadb
-    
-    chroma_host, chroma_port = get_chroma_connection_params()
-    client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
-    
-    collections = client.list_collections()
+    chroma = ChromaDBConnector()
+    collections = chroma.list_collections()
     
     if not collections:
         print("No collections found.")

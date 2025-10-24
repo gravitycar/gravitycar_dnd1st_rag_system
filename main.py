@@ -24,9 +24,9 @@ from pathlib import Path
 from gravitycar_dnd1st_rag_system.converters.pdf_converter import convert_pdfs_to_markdown, inspect_markdown_sample
 from gravitycar_dnd1st_rag_system.chunkers.monster_encyclopedia import MonsterEncyclopediaChunker
 from gravitycar_dnd1st_rag_system.chunkers.players_handbook import PlayersHandbookChunker
-from gravitycar_dnd1st_rag_system.embedders.docling_embedder import DoclingEmbedder
+from gravitycar_dnd1st_rag_system.embedders.embedder_orchestrator import EmbedderOrchestrator
 from gravitycar_dnd1st_rag_system.query.docling_query import DnDRAG
-from gravitycar_dnd1st_rag_system.utils.config import get_chroma_connection_params
+from gravitycar_dnd1st_rag_system.utils.chromadb_connector import ChromaDBConnector
 from gravitycar_dnd1st_rag_system.preprocessors.heading_organizer import HeadingOrganizer
 
 
@@ -110,22 +110,16 @@ def cmd_embed(args):
     
     print(f"Embedding chunks: {chunks_file} → {args.collection_name}")
     
-    embedder = DoclingEmbedder(
-        chunks_file=str(chunks_file),
+    # Use orchestrator for automatic format detection
+    orchestrator = EmbedderOrchestrator()
+    embedder = orchestrator.process(
+        str(chunks_file),
         collection_name=args.collection_name
     )
     
-    chunks = embedder.load_chunks()
-    embedder.embed_chunks(chunks)
-    
-    # Run test query if requested
+    # Run test queries if requested
     if args.test:
-        if "monster" in args.collection_name.lower():
-            test_query = "Tell me about demons"
-        else:
-            test_query = "What are the six character abilities?"
-        
-        embedder.test_query(test_query)
+        orchestrator.run_test_queries(embedder)
 
 
 def cmd_truncate(args):
@@ -141,23 +135,16 @@ def cmd_truncate(args):
             print("Truncation cancelled.")
             sys.exit(0)
     
-    # Create a dummy embedder just to get access to the collection
-    # We need a chunks file argument but won't use it for truncation
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        f.write('[]')
-        temp_file = f.name
+    # Use ChromaDB connector to truncate collection
+    chroma = ChromaDBConnector()
     
     try:
-        embedder = DoclingEmbedder(
-            chunks_file=temp_file,
-            collection_name=args.collection_name
-        )
-        embedder.truncate_collection()
-    finally:
-        # Clean up temp file
-        import os
-        os.unlink(temp_file)
+        count_deleted = chroma.truncate_collection(args.collection_name)
+        print(f"✅ Truncated collection '{args.collection_name}' ({count_deleted} entries deleted)")
+    except Exception as e:
+        print(f"Error: Could not truncate collection '{args.collection_name}'")
+        print(f"Details: {e}")
+        sys.exit(1)
 
 
 def cmd_query(args):
@@ -213,12 +200,9 @@ def cmd_query(args):
 
 def cmd_list_collections(args):
     """List all ChromaDB collections."""
-    import chromadb
+    chroma = ChromaDBConnector()
     
-    chroma_host, chroma_port = get_chroma_connection_params()
-    client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
-    
-    collections = client.list_collections()
+    collections = chroma.list_collections()
     
     if not collections:
         print("No collections found.")

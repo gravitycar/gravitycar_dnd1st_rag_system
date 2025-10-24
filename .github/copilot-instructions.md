@@ -37,11 +37,20 @@ All scripts assume ChromaDB is already running. Start it with `./scripts/start_c
   - Merges tables with related notes
   - Preserves hierarchy
 
-**Stage 3: Chunks → Embeddings → ChromaDB** (`src/embedders/docling_embedder.py`)
-- Model: `all-mpnet-base-v2` (768 dimensions) - **must match query embedding model**
-- Strategy: Statistics prepended to text before embedding (makes stats searchable)
-- Metadata flattened: `statistics.ARMOR_CLASS` → `stat_ARMOR_CLASS` (ChromaDB requirement)
-- Collections: `dnd_monster_manual` (294 chunks), legacy collections use 384d embeddings
+**Stage 3: Chunks → Embeddings → ChromaDB** (`src/embedders/`)
+- **Architecture**: Modular embedder system using Orchestrator + Strategy patterns
+  - `embedder_orchestrator.py`: Auto-detects format, coordinates pipeline
+  - `base_embedder.py`: Template method pattern (common operations)
+  - `monster_book_embedder.py`: Monster Manual format (statistics prepending)
+  - `rule_book_embedder.py`: PHB/DMG format (hierarchy flattening)
+- **ChromaDB Access**: All ChromaDB operations go through `ChromaDBConnector` (single source of truth)
+  - Centralized connection management in `src/utils/chromadb_connector.py`
+  - Eliminates code duplication across embedders, CLI, and query modules
+  - Provides consistent API: `get_collection()`, `create_collection()`, `truncate_collection()`, etc.
+- **Model**: OpenAI `text-embedding-3-small` (1536 dimensions)
+- **Strategy**: Format-specific text preparation (statistics prepending for monsters)
+- **Metadata**: Flattened for ChromaDB (`statistics.ARMOR_CLASS` → `armor_class`)
+- **Collections**: `dnd_monster_manual` (294 chunks), `dnd_players_handbook` (735 chunks), `dnd_dmg` (1,184 chunks)
 
 **Query Pipeline** (`src/query/docling_query.py`)
 - **Entity-aware retrieval**: Comparison queries ("owlbear vs orc") → expand to k×3, reorder to ensure both entities in top results
@@ -157,11 +166,17 @@ except Exception as e:
 
 1. `src/query/docling_query.py` - The "brain" (entity detection, gap detection, OpenAI integration)
 2. `src/chunkers/monster_encyclopedia.py` - Category detection logic (DEMON → nested monsters)
-3. `src/chunkers/recursive_chunker.py` - **NEW**: Hierarchical chunker with spell detection and adaptive splitting
-4. `src/embedders/docling_embedder.py` - Metadata flattening, statistics prepending
-5. `docs/implementations/adaptive_filtering.md` - Gap detection algorithm explained with examples
-6. `docs/implementations/recursive_chunker_implementation.md` - **NEW**: Recursive chunker implementation details
-7. `.env` - Configuration source of truth (ChromaDB host/port, OpenAI key)
+3. `src/chunkers/recursive_chunker.py` - Hierarchical chunker with spell detection and adaptive splitting
+4. `src/embedders/embedder_orchestrator.py` - Format auto-detection and pipeline coordination
+5. `src/embedders/base_embedder.py` - Template method pattern (common operations)
+6. `src/embedders/monster_book_embedder.py` - Monster Manual format handler
+7. `src/embedders/rule_book_embedder.py` - PHB/DMG format handler
+8. `src/utils/chromadb_connector.py` - **NEW**: Centralized ChromaDB connector (all DB operations)
+9. `docs/implementations/adaptive_filtering.md` - Gap detection algorithm explained with examples
+10. `docs/implementations/EmbedderArchitecture.md` - Embedder system architecture and design patterns
+11. `docs/implementations/ChromaDBConnector.md` - **NEW**: ChromaDB connector documentation and usage
+12. `docs/implementations/recursive_chunker_implementation.md` - Recursive chunker implementation details
+13. `.env` - Configuration source of truth (ChromaDB host/port, OpenAI key)
 
 ## Testing Philosophy
 
@@ -186,7 +201,49 @@ If this fails, the whole pipeline needs debugging.
 - New conventions established (e.g., testing framework patterns)
 - Integration points change (e.g., ChromaDB authentication enabled)
 
+## Recent Architectural Changes
+
+### ChromaDB Connector Centralization (October 2025)
+All ChromaDB database operations were centralized into a single connector class:
+
+**Old**: Direct `chromadb.HttpClient` imports in 4+ files (base_embedder, main.py, cli.py, docling_query.py)  
+**New**: Centralized `ChromaDBConnector` class as single source of truth
+
+**Benefits**:
+- ✅ **Zero duplication**: Connection logic in one place
+- ✅ **Consistent API**: Same methods across all modules
+- ✅ **Easier testing**: Single mock point at import location
+- ✅ **Maintainability**: Change connection logic in one file
+- ✅ **Clean separation**: Business logic separate from DB access
+
+**Key Methods**:
+- `get_collection()`, `create_collection()`, `get_or_create_collection()`
+- `delete_collection()`, `truncate_collection()`
+- `list_collections()`, `collection_exists()`, `get_collection_count()`
+
+See `docs/implementations/ChromaDBConnector.md` for full details.
+
+### Embedder Refactoring (October 2025)
+The embedder system was refactored from a monolithic class into a modular architecture:
+
+**Old**: Single `DoclingEmbedder` class with conditional logic  
+**New**: Orchestrator + Strategy pattern with format auto-detection
+
+**Benefits**:
+- ✅ **Testability**: 38 unit tests + 3 integration tests (previously 0)
+- ✅ **Extensibility**: Add new book formats without modifying existing code
+- ✅ **Maintainability**: SOLID principles enforced throughout
+- ✅ **No regressions**: All 56 tests pass, Fighter XP Table acid test validates pipeline
+
+**Key Components**:
+- `EmbedderOrchestrator`: Auto-detection and pipeline coordination
+- `Embedder`: Abstract base with template methods
+- `MonsterBookEmbedder`: Monster Manual format strategy
+- `RuleBookEmbedder`: PHB/DMG format strategy
+
+See `docs/implementations/EmbedderArchitecture.md` for full details.
+
 ---
 
-*Last Updated: October 15, 2025*  
-*Version: 1.0*
+*Last Updated: October 21, 2025*  
+*Version: 1.2 (ChromaDB Connector + Embedder Refactoring)*

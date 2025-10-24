@@ -1,20 +1,44 @@
-# Docling Embedder
+# Docling Embedder (CLI Entry Point)
 
 **File**: `src/embedders/docling_embedder.py`  
-**Purpose**: Universal embedding pipeline for chunked D&D content with intelligent metadata handling and ChromaDB storage.
+**Purpose**: Command-line interface for the embedder system  
+**Status**: ⚠️ **LEGACY DOCUMENTATION** - See `EmbedderArchitecture.md` for current architecture
 
 ---
 
-## Overview
+## Note: Architecture Changed (October 2025)
 
-The Docling Embedder takes chunked JSON files (from `monster_encyclopedia.py` or `players_handbook.py`) and:
+This document describes the **legacy monolithic implementation**. The system has been refactored into a modular architecture:
+
+- **New Architecture**: Orchestrator + Strategy pattern with format auto-detection
+- **See**: `docs/implementations/EmbedderArchitecture.md` for current design
+- **CLI Still Works**: The `docling_embedder.py` script now uses the orchestrator internally
+
+**Current Entry Point**:
+```bash
+python -m src.embedders.docling_embedder \
+    data/chunks/chunks_Monster_Manual_(1e).json \
+    dnd_monster_manual \
+    --test-queries
+```
+
+This now delegates to:
+1. `EmbedderOrchestrator` - Auto-detects format
+2. `MonsterBookEmbedder` or `RuleBookEmbedder` - Format-specific logic
+3. `Embedder` base class - Common operations
+
+---
+
+## Legacy Overview (Historical Context)
+
+The original Docling Embedder took chunked JSON files (from `monster_encyclopedia.py` or `players_handbook.py`) and:
 
 1. **Embeds** text using Sentence Transformers
 2. **Prepends statistics** to chunk text for better searchability
 3. **Flattens metadata** for ChromaDB compatibility
 4. **Stores** embeddings and metadata in ChromaDB collections
 
-This is a **universal embedder**—it works with any chunked JSON format from the chunking pipeline.
+This was a **universal embedder**—it worked with any chunked JSON format from the chunking pipeline, but used conditional logic to handle different formats.
 
 ---
 

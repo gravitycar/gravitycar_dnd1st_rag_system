@@ -6,7 +6,6 @@ Retrieves relevant chunks from ChromaDB and generates answers using OpenAI's GPT
 Supports both Player's Handbook and Monster Manual collections.
 """
 
-import chromadb
 from openai import OpenAI
 from pathlib import Path
 import os
@@ -14,7 +13,8 @@ import argparse
 import sys
 
 # Import our centralized configuration
-from ..utils.config import get_chroma_connection_params, get_openai_api_key, get_default_collection_name
+from ..utils.config import get_openai_api_key, get_default_collection_name
+from ..utils.chromadb_connector import ChromaDBConnector
 
 
 class DnDRAG:
@@ -31,16 +31,11 @@ class DnDRAG:
         self.collection_name = collection_name
         self.model = model
         
-        # Get configuration from centralized config utility
-        if chroma_host is None or chroma_port is None:
-            chroma_host, chroma_port = get_chroma_connection_params()
-        
         api_key = get_openai_api_key()
         
         print(f"Initializing D&D RAG system...")
         print(f"  Collection: {collection_name}")
         print(f"  Model: {model}")
-        print(f"  ChromaDB: {chroma_host}:{chroma_port}")
         
         # Initialize OpenAI client
         self.openai_client = OpenAI(api_key=api_key)
@@ -49,16 +44,17 @@ class DnDRAG:
         self.embedding_model_name = "text-embedding-3-small"
         print(f"  Using OpenAI embedding model: {self.embedding_model_name}")
         
-        # Connect to ChromaDB
+        # Connect to ChromaDB using connector
         print(f"  Connecting to ChromaDB...")
-        self.chroma_client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
+        self.chroma = ChromaDBConnector(chroma_host, chroma_port)
+        print(f"  ChromaDB: {self.chroma.chroma_host}:{self.chroma.chroma_port}")
         
         try:
-            self.collection = self.chroma_client.get_collection(name=collection_name)
+            self.collection = self.chroma.get_collection(collection_name)
             print(f"  ✅ Connected to collection: {collection_name}")
         except Exception as e:
             print(f"  ❌ Error: Collection '{collection_name}' not found")
-            print(f"     Available collections: {[c.name for c in self.chroma_client.list_collections()]}")
+            print(f"     Available collections: {[c.name for c in self.chroma.list_collections()]}")
             raise
     
     def get_embedding(self, text: str):
@@ -244,7 +240,7 @@ class DnDRAG:
             # Find the largest gap
             max_gap_pos = None
             max_gap_size = 0
-            gap_threshold = 0.1  # Significant semantic discontinuity
+            gap_threshold = 0.04  # Significant semantic discontinuity
             
             if gaps:
                 max_gap_pos, max_gap_size = max(gaps, key=lambda x: x[1])
@@ -330,20 +326,49 @@ class DnDRAG:
         system_prompt = """You are a knowledgeable Dungeon Master assistant for Advanced Dungeons & Dragons 1st Edition.
 
 Your role is to provide accurate, helpful answers based on the official rulebooks. When answering:
-1. Be precise and cite specific rules, tables, or mechanics
-2. If the context contains tables, interpret them correctly
-3. If information is not in the provided context, say so clearly
-4. Use D&D terminology correctly
-5. Be concise but complete in your answers
+1. Be precise and cite the specific rules context element you are using to establish your answer.
+2. If the context contains tables, READ THEM CAREFULLY:
+   - Identify the correct row (first column)
+   - Identify the correct column header
+   - Show the EXACT intersection value you're using
+   - Double-check your reading before calculating
+3. When calculating combat probabilities:
+   - Start with the base "to hit" number from the attack matrix
+   - Apply ALL relevant modifiers (strength "to hit" bonus, dexterity bonuses, etc.)
+   - Modifiers REDUCE the required die roll (a +1 bonus means you need to roll 1 less)
+   - Calculate probability as: (21 - adjusted_roll_needed) / 20
+4. If information is not in the provided context, say so clearly
+5. Use D&D terminology correctly
+6. Show your work step-by-step for complex calculations
 
 The context below comes from official AD&D 1st Edition rulebooks."""
+
+        # Detect if this is a combat probability question
+        is_combat_calc = any(phrase in query.lower() for phrase in [
+            'to hit', 'likely', 'probability', 'chance', 'attack', 'hit an armor class'
+        ])
+        
+        example_section = ""
+        if is_combat_calc:
+            example_section = """
+
+EXAMPLE CALCULATION:
+Question: "How likely is a 5th level fighter with strength 18 to hit AC 2?"
+Steps:
+1. Find base "to hit" from attack matrix: Level 5-6 fighter vs AC 2 = need to roll 14
+2. Apply strength bonus: Strength 18 gives +1 to hit, so 14 - 1 = 13
+3. Calculate probability: Need to roll 13+ on d20 = (20 - 13 + 1) / 20 = 8/20 = 40%
+Answer: 40% chance to hit
+
+IMPORTANT: When reading tables, carefully match the row (AC value) with the column (character level).
+"""
 
         user_prompt = f"""Context from D&D 1st Edition rulebooks:
 
 {context}
 
 ---
-
+{example_section}
 Question: {query}
 
 Answer based on the context above:"""

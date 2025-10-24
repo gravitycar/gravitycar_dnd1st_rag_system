@@ -215,6 +215,31 @@ class MagicItemsHandler(SpecialCaseHandler):
         return subheading_level >= 6
 
 
+class CombatTablesHandler(SpecialCaseHandler):
+    """Handler for COMBAT → Matrices sections
+    
+    Chunks on level 3 and level 4 
+    """
+    
+    COMBAT_TABLES_PATTERN = r"^COMBAT TABLES$"
+    
+    def matches(self, hierarchy: List[str]) -> bool:
+        """Check if hierarchy represents the COMBAT TABLES section."""
+        if not hierarchy:
+            return False
+        
+        # Check if COMBAT TABLES is in the hierarchy
+        return any(re.search(self.COMBAT_TABLES_PATTERN, h, re.IGNORECASE) for h in hierarchy)
+    
+    def get_chunk_level(self, hierarchy: List[str]) -> int:
+        """Chunk on level 3 and level 4 headings."""
+        # Return 3 as primary, but ChunkBuilder will handle both 3 and 4
+        return 3
+    
+    def should_include_subheadings(self, subheading_level: int) -> bool:
+        """Include level 5+ headings within chunks."""
+        return subheading_level >= 5
+
 class InsanityHandler(SpecialCaseHandler):
     """Handler for COMBAT → INSANITY section.
     
@@ -364,6 +389,7 @@ class SpecialCaseRegistry:
             LowerPlanesCreaturesHandler(),
             SampleDungeonHandler(),
             PursuitEvasionHandler(),
+            CombatTablesHandler(),
         ]
     
     def get_handler(self, hierarchy: List[str]) -> Optional[SpecialCaseHandler]:
@@ -486,6 +512,9 @@ class ChunkBuilder:
                 return heading.level in [3, 4]
             # Special case: PursuitEvasionHandler chunks on both level 3 and 4
             if isinstance(handler, PursuitEvasionHandler):
+                return heading.level in [3, 4]
+            # Special case: CombatTable chunks on both level 3 and 4
+            if isinstance(handler, CombatTablesHandler):
                 return heading.level in [3, 4]
             # Use handler's chunk level for other handlers
             target_level = handler.get_chunk_level(heading.hierarchy)
