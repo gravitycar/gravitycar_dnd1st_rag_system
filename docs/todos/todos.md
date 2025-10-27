@@ -19,3 +19,4 @@
     kw_model.extract_keywords("who would win in a fight, an ogre or an umber hulk")
     # [('ogre', 0.7), ('umber hulk', 0.68), ('fight', 0.65)]
 ```
+[] include YAML in the markdown that gets copied to metadata in the chunks to help LLM decypher tables. During table conversion to JSON, we can get the LLM doing the converting to provide the instructions for understanding the table.

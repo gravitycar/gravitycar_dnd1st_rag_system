@@ -24,10 +24,12 @@ from pathlib import Path
 from gravitycar_dnd1st_rag_system.converters.pdf_converter import convert_pdfs_to_markdown, inspect_markdown_sample
 from gravitycar_dnd1st_rag_system.chunkers.monster_encyclopedia import MonsterEncyclopediaChunker
 from gravitycar_dnd1st_rag_system.chunkers.players_handbook import PlayersHandbookChunker
+from gravitycar_dnd1st_rag_system.chunkers.recursive_chunker import RecursiveChunker
 from gravitycar_dnd1st_rag_system.embedders.embedder_orchestrator import EmbedderOrchestrator
 from gravitycar_dnd1st_rag_system.query.docling_query import DnDRAG
 from gravitycar_dnd1st_rag_system.utils.chromadb_connector import ChromaDBConnector
 from gravitycar_dnd1st_rag_system.preprocessors.heading_organizer import HeadingOrganizer
+from gravitycar_dnd1st_rag_system.transformers.table_transformer import TableTransformer
 
 
 def cmd_convert(args):
@@ -74,30 +76,42 @@ def cmd_chunk(args):
         print(f"Error: File not found: {markdown_file}")
         sys.exit(1)
     
+    # Generate output filename
+    output_file = Path("data/chunks") / f"chunks_{markdown_file.stem}.json"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
     # Determine chunker type
     if args.type == "monster" or "monster" in markdown_file.name.lower():
         print(f"Chunking Monster Manual: {markdown_file}")
         chunker = MonsterEncyclopediaChunker()
         chunks = chunker.chunk_markdown_file(str(markdown_file))
-    elif args.type == "player" or "player" in markdown_file.name.lower():
-        print(f"Chunking Player's Handbook: {markdown_file}")
-        chunker = PlayersHandbookChunker()
-        chunks = chunker.chunk_markdown_file(str(markdown_file))
+        
+        # Save chunks
+        import json
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(chunks, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ Created {len(chunks)} chunks: {output_file}")
+        
+    elif args.type == "player" or "player" in markdown_file.name.lower() or "dungeon_master" in markdown_file.name.lower():
+        print(f"Chunking rulebook with RecursiveChunker: {markdown_file}")
+        
+        # Use RecursiveChunker for player's handbook and DM guide
+        chunker = RecursiveChunker(
+            markdown_file=str(markdown_file),
+            output_file=str(output_file),
+            max_chunk_size=2000,
+            report=True  # Show chunking statistics
+        )
+        
+        # Process and save (RecursiveChunker handles its own output)
+        chunks = chunker.process()
+        
+        print(f"✅ Created {len(chunks)} chunks: {output_file}")
     else:
         print(f"Error: Could not determine document type for {markdown_file}")
         print("Use --type monster or --type player, or ensure filename contains 'monster' or 'player'")
         sys.exit(1)
-    
-    # Generate output filename
-    output_file = Path("data/chunks") / f"chunks_{markdown_file.stem}.json"
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Save chunks
-    import json
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(chunks, f, indent=2, ensure_ascii=False)
-    
-    print(f"✅ Created {len(chunks)} chunks: {output_file}")
 
 
 def cmd_embed(args):
@@ -214,6 +228,58 @@ def cmd_list_collections(args):
     
     for collection in collections:
         count = collection.count()
+
+
+def cmd_transform_tables(args):
+    """Transform complex markdown tables to JSON using OpenAI."""
+    try:
+        transformer = TableTransformer(
+            markdown_file=args.markdown_file,
+            table_list_file=args.table_list,
+            output_dir=args.output_dir,
+            api_key=args.api_key,
+            model=args.model,
+            delay_seconds=args.delay,
+            cost_limit_usd=args.cost_limit
+        )
+        
+        report = transformer.transform(dry_run=args.dry_run)
+        
+        if args.dry_run:
+            print(f"\n✅ Dry run complete")
+            print(f"Estimated cost: ${report.total_cost_usd:.4f}")
+        else:
+            print(f"\n✅ Transformation complete!")
+            print(f"Processed {report.successful}/{report.total_tables} tables successfully")
+            print(f"Cost: ${report.total_cost_usd:.4f}")
+            
+            if report.failed > 0:
+                print(f"\n⚠️  {report.failed} table(s) failed")
+    
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Transformation cancelled by user")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        sys.exit(1)
+
+
+def cmd_list_collections(args):
+    """List all ChromaDB collections."""
+    chroma = ChromaDBConnector()
+    
+    collections = chroma.list_collections()
+    
+    if not collections:
+        print("No collections found.")
+        return
+    
+    print(f"\nFound {len(collections)} collection(s):\n")
+    print(f"{'Name':<30} {'Count':<8} {'ID'}")
+    print("=" * 70)
+    
+    for collection in collections:
+        count = collection.count()
         print(f"{collection.name:<30} {count:<8} {collection.id}")
 
 
@@ -265,6 +331,17 @@ Examples:
     truncate_parser.add_argument('--confirm', action='store_true', 
                                 help='Confirm truncation without prompting')
     
+    # Transform tables command
+    transform_parser = subparsers.add_parser('transform-tables', help='Transform complex markdown tables to JSON')
+    transform_parser.add_argument('markdown_file', help='Markdown file to transform')
+    transform_parser.add_argument('table_list', help='Table list file')
+    transform_parser.add_argument('--dry-run', action='store_true', help='Estimate cost without executing')
+    transform_parser.add_argument('--model', default='gpt-4o-mini', help='OpenAI model (default: gpt-4o-mini)')
+    transform_parser.add_argument('--delay', type=float, default=1.0, help='Delay between API calls (default: 1.0)')
+    transform_parser.add_argument('--cost-limit', type=float, default=5.0, help='Maximum cost in USD (default: 5.0)')
+    transform_parser.add_argument('--output-dir', help='Output directory')
+    transform_parser.add_argument('--api-key', help='OpenAI API key (if not in .env)')
+    
     # Query command
     query_parser = subparsers.add_parser('query', help='Query ChromaDB collection')
     query_parser.add_argument('collection_name', help='ChromaDB collection name')
@@ -293,6 +370,7 @@ Examples:
         'chunk': cmd_chunk,
         'embed': cmd_embed,
         'truncate': cmd_truncate,
+        'transform-tables': cmd_transform_tables,
         'query': cmd_query,
         'list-collections': cmd_list_collections,
     }
