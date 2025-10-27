@@ -141,8 +141,14 @@ class ChromaDBConnector:
         collection = self.get_collection(name)
         count_before = collection.count()
         
-        # Delete all entries
-        collection.delete(where={})
+        if count_before == 0:
+            return 0
+        
+        # Get all IDs and delete them
+        # ChromaDB v2 API requires specific IDs, not an empty where clause
+        result = collection.get(limit=count_before)
+        if result and result['ids']:
+            collection.delete(ids=result['ids'])
         
         return count_before
     

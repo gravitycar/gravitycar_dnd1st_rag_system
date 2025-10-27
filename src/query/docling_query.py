@@ -240,7 +240,7 @@ class DnDRAG:
             # Find the largest gap
             max_gap_pos = None
             max_gap_size = 0
-            gap_threshold = 0.04  # Significant semantic discontinuity
+            gap_threshold = 0.06  # Significant semantic discontinuity
             
             if gaps:
                 max_gap_pos, max_gap_size = max(gaps, key=lambda x: x[1])
@@ -302,7 +302,7 @@ class DnDRAG:
         )):
             name = metadata.get('name', metadata.get('title', 'Unknown'))
             chunk_type = metadata.get('type', 'text')
-            
+            chunk_part = metadata.get('chunk_part', 1)
             # For monsters and categories, the doc already has the header with statistics
             # so we don't need to add extra formatting
             if chunk_type in ['monster', 'category']:
@@ -319,6 +319,7 @@ class DnDRAG:
             else:
                 contexts.append(f"### {name}\n\n{doc}")
         
+
         return "\n\n---\n\n".join(contexts)
     
     def generate(self, query: str, context: str, max_tokens: int = 800):
@@ -332,43 +333,28 @@ Your role is to provide accurate, helpful answers based on the official rulebook
    - Identify the correct column header
    - Show the EXACT intersection value you're using
    - Double-check your reading before calculating
-3. When calculating combat probabilities:
-   - Start with the base "to hit" number from the attack matrix
+3. If the context contains JSON notation:
+   - Parse the JSON into an object
+   - Then parse the object's properties to search for your answer.
+   - Explain which properties you are using and why.
+4. When calculating combat probabilities:
+   - Explain which piece of context you're getting your numbers from.
    - Apply ALL relevant modifiers (strength "to hit" bonus, dexterity bonuses, etc.)
    - Modifiers REDUCE the required die roll (a +1 bonus means you need to roll 1 less)
-   - Calculate probability as: (21 - adjusted_roll_needed) / 20
-4. If information is not in the provided context, say so clearly
-5. Use D&D terminology correctly
-6. Show your work step-by-step for complex calculations
+5. If information is not in the provided context, say so clearly
+6. Use D&D terminology correctly
+7. Show your work step-by-step for complex calculations
 
-The context below comes from official AD&D 1st Edition rulebooks."""
+The context below comes from official AD&D 1st Edition rulebooks. Use this context AND ONLY this context to answer.
 
-        # Detect if this is a combat probability question
-        is_combat_calc = any(phrase in query.lower() for phrase in [
-            'to hit', 'likely', 'probability', 'chance', 'attack', 'hit an armor class'
-        ])
-        
-        example_section = ""
-        if is_combat_calc:
-            example_section = """
-
-EXAMPLE CALCULATION:
-Question: "How likely is a 5th level fighter with strength 18 to hit AC 2?"
-Steps:
-1. Find base "to hit" from attack matrix: Level 5-6 fighter vs AC 2 = need to roll 14
-2. Apply strength bonus: Strength 18 gives +1 to hit, so 14 - 1 = 13
-3. Calculate probability: Need to roll 13+ on d20 = (20 - 13 + 1) / 20 = 8/20 = 40%
-Answer: 40% chance to hit
-
-IMPORTANT: When reading tables, carefully match the row (AC value) with the column (character level).
+IMPORTANT: you must only use the provided context to answer questions. If the context doesn't provide enough information, explain what might additional information you need.
 """
-
+   
         user_prompt = f"""Context from D&D 1st Edition rulebooks:
 
 {context}
 
 ---
-{example_section}
 Question: {query}
 
 Answer based on the context above:"""
@@ -380,7 +366,7 @@ Answer based on the context above:"""
                 {"role": "user", "content": user_prompt}
             ],
             max_tokens=max_tokens,
-            temperature=0.3  # Lower temperature for more factual responses
+            temperature=0.1  # Lower temperature for more factual responses
         )
         
         return response.choices[0].message.content

@@ -43,6 +43,7 @@ def get_pdf_pipeline():
     pipeline_options.do_table_structure = True  # Extract table structure
     pipeline_options.ocr_options = EasyOcrOptions(force_full_page_ocr=False)
     pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
+    pipeline_options.table_structure_options.do_cell_matching = True
     return pipeline_options
 
 def get_docling_converter(pipeline_options):

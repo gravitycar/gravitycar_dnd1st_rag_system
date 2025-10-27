@@ -22,3 +22,6 @@ When writing code, consider the following best practices:
 3. **Performance**: Optimize your code for performance, but not at the expense of readability and maintainability. Use efficient algorithms and data structures where appropriate.
 4. **Testing**: Write unit tests for your code to ensure its correctness and reliability.
 5. **Documentation**: Document your code and APIs thoroughly to help other developers understand how to use and maintain it.
+
+
+You're operating in a virtual environment. You will need to run ```source venv/bin/activate``` to activate it before running Python scripts. You only have to run this once per session.

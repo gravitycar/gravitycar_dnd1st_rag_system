@@ -680,6 +680,31 @@ class SplitManager:
         
         return '\n'.join(compressed_lines)
     
+    def clean_json_code_blocks(self, content: str) -> str:
+        """
+        Remove JSON code block delimiters from content.
+        
+        Args:
+            content: Content string that may contain JSON code blocks
+            
+        Returns:
+            Content with ```json and ``` delimiters removed
+        """
+        lines = content.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            # Skip ```json opening delimiter
+            if stripped == "```json" or stripped.lower() == "```json":
+                continue
+            # Skip ``` closing delimiter (when standalone)
+            if stripped == "```":
+                continue
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+    
     def is_in_table(self, content: str, position: int) -> bool:
         """Check if position is within a table."""
         # Get lines before position
@@ -693,6 +718,18 @@ class SplitManager:
                 return False
         
         return False
+    
+    def is_in_json_code_block(self, content: str, position: int) -> bool:
+        """Check if position is within a JSON code block (```json ... ```)."""
+        # Count code block delimiters before position
+        content_before = content[:position]
+        
+        # Find all ```json and ``` markers
+        json_starts = [m.start() for m in re.finditer(r'```json', content_before, re.IGNORECASE)]
+        code_ends = [m.start() for m in re.finditer(r'```(?!json)', content_before)]
+        
+        # If we have more starts than ends, we're inside a JSON block
+        return len(json_starts) > len(code_ends)
     
     def find_table_end(self, content: str, start_pos: int) -> int:
         """Find end of table starting from position.
@@ -713,6 +750,24 @@ class SplitManager:
         # Table extends to end of content
         return len(content)
     
+    def find_json_code_block_end(self, content: str, start_pos: int) -> int:
+        """Find end of JSON code block starting from position.
+        
+        CRITICAL: JSON code blocks are NEVER split, regardless of size. This preserves
+        the integrity of code examples for better semantic understanding.
+        """
+        remaining = content[start_pos:]
+        
+        # Find the closing ``` marker
+        end_marker = re.search(r'```(?!json)', remaining)
+        
+        if end_marker:
+            # Return position after the closing ```
+            return start_pos + end_marker.end()
+        
+        # Code block extends to end of content
+        return len(content)
+    
     def split_chunk(self, chunk: Chunk) -> List[Chunk]:
         """Split chunk if it exceeds max size."""
         # First, compress tables
@@ -720,9 +775,11 @@ class SplitManager:
         
         # Check if compression was enough
         if len(compressed_content) <= self.max_chunk_size:
-            # Update chunk with compressed content
-            chunk.content = compressed_content
-            chunk.metadata["char_count"] = len(compressed_content)
+            # Clean JSON code block delimiters
+            cleaned_content = self.clean_json_code_blocks(compressed_content)
+            # Update chunk with compressed and cleaned content
+            chunk.content = cleaned_content
+            chunk.metadata["char_count"] = len(cleaned_content)
             return [chunk]
         
         # Need to split - use compressed content
@@ -782,9 +839,18 @@ class SplitManager:
                     table_end = self.find_table_end(content, split_pos)
                     # Always use table_end - tables are never split, no matter the size
                     split_pos = table_end
+                
+                # CRITICAL: Check if we're in a JSON code block - NEVER split code blocks regardless of size
+                if self.is_in_json_code_block(content, split_pos):
+                    code_block_end = self.find_json_code_block_end(content, split_pos)
+                    # Always use code_block_end - JSON blocks are never split, no matter the size
+                    split_pos = code_block_end
             
             # Extract chunk content
             chunk_content = content[current_pos:split_pos].strip()
+            
+            # Clean JSON code block delimiters from extracted content
+            chunk_content = self.clean_json_code_blocks(chunk_content)
             
             if chunk_content:
                 # Create sub-chunk metadata
@@ -941,6 +1007,31 @@ class RecursiveChunker:
         output_dir = Path("data/chunks")
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir / f"chunks_{self.markdown_file.name.replace('.md', '.json')}"
+    
+    def _clean_json_code_blocks(self, content: str) -> str:
+        """
+        Remove JSON code block delimiters from content.
+        
+        Args:
+            content: Content string that may contain JSON code blocks
+            
+        Returns:
+            Content with ```json and ``` delimiters removed
+        """
+        lines = content.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            # Skip ```json opening delimiter
+            if stripped == "```json" or stripped.lower() == "```json":
+                continue
+            # Skip ``` closing delimiter (when standalone)
+            if stripped == "```":
+                continue
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
     
     def process(self) -> List[Chunk]:
         """Process markdown file and generate chunks."""

@@ -1,0 +1,5 @@
+| Fighter Level | XP Required | Hit Dice |
+|---|---|---|
+| 1 | 0 | 1d10 |
+| 2 | 2,000 | 2d10 |
+| 3 | 4,000 | 3d10 |

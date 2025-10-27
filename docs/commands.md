@@ -13,6 +13,7 @@ The D&D 1st Edition RAG System provides a unified CLI interface for all pipeline
 ```bash
 python main.py convert <pdf_file>
 python main.py organize <markdown_file> [options]
+python main.py transform-tables <markdown_file> <table_list> [options]
 python main.py chunk <markdown_file> [--type TYPE]
 python main.py embed <chunks_file> <collection_name> [--test]
 python main.py query <collection_name> [question] [options]
@@ -97,15 +98,134 @@ python main.py organize data/markdown/Players_Handbook_(1e).md \
 
 ---
 
-### 3. `chunk` - Chunk Markdown Documents
+### 3. `transform-tables` - Transform Tables to JSON
+
+**Purpose**: Convert complex markdown tables to structured JSON using OpenAI for improved RAG accuracy.
+
+**Syntax**:
+```bash
+python main.py transform-tables <markdown_file> <table_list> [options]
+```
+
+**Arguments**:
+- `markdown_file` - Path to markdown file to transform (required)
+- `table_list` - Path to table list file (required)
+
+**Options**:
+- `--dry-run` - Estimate cost without executing transformation
+- `--model MODEL` - OpenAI model (default: `gpt-4o-mini`)
+- `--delay DELAY` - Delay between API calls in seconds (default: `1.0`)
+- `--cost-limit COST_LIMIT` - Maximum cost in USD (default: `5.0`)
+- `--output-dir OUTPUT_DIR` - Output directory (default: `data/markdown/docling/good_pdfs/`)
+- `--api-key API_KEY` - OpenAI API key (overrides `.env`)
+
+**Examples**:
+
+**Dry Run (Estimate Cost)**:
+```bash
+python main.py transform-tables \
+  data/markdown/docling/good_pdfs/Dungeon_Master_s_Guide_(1e)_organized.md \
+  tmp/dmg_tables_2d_matrix_lookup.md \
+  --dry-run
+```
+
+**Transform All Tables**:
+```bash
+python main.py transform-tables \
+  data/markdown/docling/good_pdfs/Dungeon_Master_s_Guide_(1e)_organized.md \
+  tmp/dmg_tables_2d_matrix_lookup.md
+```
+
+**Custom Settings**:
+```bash
+python main.py transform-tables \
+  data/markdown/docling/good_pdfs/Dungeon_Master_s_Guide_(1e)_organized.md \
+  tmp/dmg_tables_2d_matrix_lookup.md \
+  --model gpt-4o \
+  --delay 2.0 \
+  --cost-limit 10.0 \
+  --output-dir output/
+```
+
+**Table List Format**:
+```markdown
+# Table List
+
+---
+
+## Table 1
+
+**Location**: Lines 1615-1640
+
+**Description**: Troop Type Table
+
+---
+
+## Table 2
+
+**Location**: Lines 2777-2786
+
+**Description**: Encounter Frequency
+```
+
+**Output**:
+- Creates: `<original_name>_with_json_tables.md` in output directory
+- Backup: `<original_name>.bak` created before transformation
+- Report: Displays transformation statistics and cost
+
+**Process**:
+1. **Load Phase**: Read markdown and parse table list metadata
+2. **Estimation Phase**: Calculate expected API cost (accounts for 30-50% token reduction from preprocessing)
+3. **Processing Phase**: For each table:
+   - Extract heading-bounded context
+   - Preprocess table (strip whitespace, compress separators)
+   - Transform via OpenAI API
+   - Track tokens and cost
+4. **Application Phase**: Replace tables in markdown (reverse order to preserve line numbers)
+5. **Output Phase**: Write transformed file with backup
+6. **Reporting Phase**: Generate summary statistics
+
+**Token Optimization**:
+- Strips excessive whitespace (preserves 1 space padding per cell)
+- Compresses separator lines to 3 hyphens
+- Achieves 30-50% token reduction while preserving table structure
+- Validated: Tables still render correctly in markdown
+
+**Cost Management**:
+- Dry run provides accurate cost estimate
+- Default limit: $5.00 (prompts user if exceeded)
+- Typical costs: $0.05-$0.10 per 100 tables (gpt-4o-mini)
+- Progress tracking shows per-table token usage and cost
+
+**Error Handling**:
+- Automatic retries for rate limits (3 attempts, exponential backoff)
+- Graceful per-table failures (continues processing, reports at end)
+- Keyboard interrupt handling (saves progress)
+- Detailed error messages with table locations
+
+**Requirements**:
+- OpenAI API key in `.env` file (`gravitycar_openai_api_key`)
+- Valid table list with line numbers matching markdown
+- Tables must be valid markdown format
+
+**Standalone CLI**:
+```bash
+python -m src.transformers.cli <markdown_file> <table_list> [options]
+```
+
+**Documentation**:
+- Full guide: `docs/implementations/TableTransformer.md`
+- Implementation plan: `docs/implementation_plans/complex_table_transformer.md`
+
+---
+
+### 4. `chunk` - Chunk Markdown Documents
 
 **Purpose**: Split markdown documents into semantic chunks for embedding.
 
 **Syntax**:
 ```bash
-python main.py chunk <markdown_file> [--type {monster|player}]
-```
-
+````
 **Arguments**:
 - `markdown_file` - Path to markdown file to chunk (required)
 
@@ -172,7 +292,7 @@ python main.py chunk data/markdown/my_custom_monster_list.md --type monster
 
 ---
 
-### 4. `embed` - Embed Chunks into ChromaDB
+### 5. `embed` - Embed Chunks into ChromaDB
 
 **Purpose**: Generate embeddings and store chunks in ChromaDB vector database.
 
@@ -240,7 +360,7 @@ Processing batch 2/10 (chunks 33-64)...
 
 ---
 
-### 5. `query` - Query ChromaDB Collection
+### 6. `query` - Query ChromaDB Collection
 
 **Purpose**: Ask questions about D&D rules using RAG (Retrieval-Augmented Generation).
 
@@ -379,9 +499,9 @@ A beholder is a fearsome and iconic Dungeons & Dragons monster...
 
 ---
 
-### 6. `truncate` - Empty ChromaDB Collection
+### 7. `truncate` - Empty ChromaDB Collection
 
-**Purpose**: Delete all entries from a collection while preserving its structure.
+**Purpose**: Remove all documents from a ChromaDB collection while keeping the collection itself.
 
 **Syntax**:
 ```bash
@@ -454,9 +574,9 @@ python main.py truncate nonexistent_collection
 
 ---
 
-### 7. `list-collections` - List ChromaDB Collections
+### 8. `list-collections` - List ChromaDB Collections
 
-**Purpose**: Display all available ChromaDB collections with entry counts.
+**Purpose**: Display all available ChromaDB collections with their document counts.
 
 **Syntax**:
 ```bash
