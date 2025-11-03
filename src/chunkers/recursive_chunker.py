@@ -599,14 +599,18 @@ class ChunkBuilder:
             chunk_type = "default"
             special_handler_name = None
         
+        # Extract query_must from JSON blocks in content (if present)
+        query_must, cleaned_content = self._extract_query_must_from_json(content)
+        
         # Create metadata
         metadata = {
+            "uid": uid,  # Add uid to metadata for ChromaDB filtering
             "hierarchy": self.current_chunk_heading.hierarchy,
             "parent_heading": self.current_chunk_heading.hierarchy[-2] if len(self.current_chunk_heading.hierarchy) > 1 else None,
             "parent_chunk_uid": self.parent_chunk_uid,
             "start_line": self.current_chunk_start_line,
             "end_line": end_line,
-            "char_count": len(content),
+            "char_count": len(cleaned_content),
             "chunk_type": chunk_type,  # Our internal type
             "type": chunk_type,  # For embedder compatibility
             "chunk_level": self.current_chunk_heading.level,
@@ -615,16 +619,98 @@ class ChunkBuilder:
         if special_handler_name:
             metadata["special_handler"] = special_handler_name
         
+        # Add query_must to metadata if found
+        if query_must:
+            metadata["query_must"] = query_must
+        
         # Create chunk
         chunk = Chunk(
             uid=uid,
             book=self.book_name,
             title=self.current_chunk_heading.text,
-            content=content,
+            content=cleaned_content,
             metadata=metadata
         )
         
         self.chunks.append(chunk)
+    
+    def _extract_query_must_from_json(self, content: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        """
+        Extract query_must from JSON blocks in content and remove it.
+        
+        Simple approach:
+        1. Find potential JSON object start positions (every '{')
+        2. Try to parse JSON at each position using json.JSONDecoder
+        3. If query_must property exists, extract it
+        4. Remove query_must from the JSON object
+        5. Replace original JSON with cleaned JSON
+        
+        This approach is format-agnostic - as the JSON structure changes,
+        no code changes are needed. We simply parse, extract, and re-serialize.
+        
+        Args:
+            content: Chunk content that may contain JSON objects with query_must
+            
+        Returns:
+            Tuple of (query_must_dict, cleaned_content)
+            - query_must_dict: The extracted query_must object, or None if not found
+            - cleaned_content: Content with query_must removed from JSON objects
+        """
+        # Quick check: does content contain "query_must"?
+        if '"query_must"' not in content:
+            return None, content
+        
+        query_must_data = None
+        cleaned_content = content
+        
+        # Find all '{' positions - potential JSON starts
+        json_starts = [i for i, char in enumerate(content) if char == '{']
+        
+        if not json_starts:
+            return None, content
+        
+        # Store valid JSON objects with their positions
+        valid_jsons = []  # List of (start_pos, end_pos, json_obj)
+        
+        # Try to parse JSON at each '{' position
+        decoder = json.JSONDecoder()
+        for start_pos in json_starts:
+            try:
+                # Try to decode JSON starting at this position
+                json_obj, end_idx = decoder.raw_decode(content, start_pos)
+                end_pos = start_pos + end_idx
+                
+                # Check if this JSON has query_must
+                if isinstance(json_obj, dict) and "query_must" in json_obj:
+                    valid_jsons.append((start_pos, end_pos, json_obj))
+                    
+            except json.JSONDecodeError:
+                # Not valid JSON at this position, continue
+                continue
+        
+        if not valid_jsons:
+            return None, content
+        
+        # Process in reverse order to maintain string positions
+        for start_pos, end_pos, json_obj in reversed(valid_jsons):
+            # Create a copy and remove query_must
+            cleaned_json_obj = json_obj.copy()
+            cleaned_json_obj.pop("query_must")
+            
+            # Re-serialize the cleaned JSON object
+            cleaned_json_str = json.dumps(cleaned_json_obj, indent=2, ensure_ascii=False)
+            
+            # Replace the original JSON with cleaned version
+            cleaned_content = (
+                cleaned_content[:start_pos] + 
+                cleaned_json_str + 
+                cleaned_content[end_pos:]
+            )
+        
+        # Extract the first query_must (first in forward order)
+        query_must_data = valid_jsons[0][2]["query_must"]
+        
+        return query_must_data, cleaned_content
     
     def _generate_uid(self, hierarchy: List[str], base_only: bool = False) -> str:
         """Generate unique ID from hierarchy."""

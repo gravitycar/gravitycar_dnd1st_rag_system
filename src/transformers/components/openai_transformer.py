@@ -47,9 +47,68 @@ The JSON should follow these exact formatting rules:
 - Each JSON object should include:
     - title: If the context includes a markdown heading, use that heading as the title. Append the y-axis column name and current y-axis row value.
     - description: Plain-english description of the table's data and its purpose.
-- The JSON property names should be based on the table headings. They should be descriptive but not verbose. DO NOT ABBREVIATE. Always use associative arrays with keys based on the table headings so that each value has a description.
-- Use nested data structures to organize related data logically. Do NOT flatten the data into a single level.
-- Convert numeric values to appropriate types (int, float)
+    - The JSON property names should be based on the table headings. They should be descriptive but not verbose. DO NOT ABBREVIATE. Always use associative arrays with keys based on the table headings so that each value has a description.
+    - Use nested data structures to organize related data logically. Do NOT flatten the data into a single level.
+    - Convert numeric values to appropriate types (int, float)
+    - query_must: this is metadata our application will use for filtering. It will contain properties named for operators, and values you supply that will be compared to the user's prompt using the operator. You should populate this object as follows:
+        - All query_must properties and values must be in lower case.
+        - The 'query_must.contain_one_of' property is an array of arrays. Each array is a list of scalar values.
+        - The 'query_must.contain' property is scalar.
+        - The 'query_must.contain_range' property is an object with "min" and "max" integer properties.
+        - All abbreviations must be accounted for. These are the common abbreviations: 
+            'opponent armor class' = 'armor class' = 'a.c.' = 'ac'
+            'hit points' = 'h.p.' = 'hp'
+            'strength' = 'str'
+            'dexterity' = 'dex'
+            'intelligence' = 'int'
+            'constitution' = 'con'
+            'wisdom' = 'wis'
+            'charisma' = 'cha'
+            'hit dice' = 'hd'
+          If the y-axis column name is in the list of common abbreviations, include every abbreviation for that column name and the current y-axis value in an array. Append that array to the query_must.contain_one_of property. Otherwise, use query_must.contain for a single "<y-axis column name> <current y-axis value>" pair.
+        - If the table pertains to a specific class of things, like "clerics, druids and monks" or "psionics", collect all of those terms into an array. Add both singular and plural versions of each term. Append the resulting array to the 'contain_one_of' property.
+        - If the y-axis column represents a numerical range (like "10-13" for ability scores), use query_must.contain_range with min and max values. Also include the ability/stat names in contain_one_of.
+
+        - Example: query_must for attack matrix with abbreviations:
+        {{
+            "query_must": {{
+                "contain_one_of": [
+                    ["cleric", "clerics", "druid", "druids", "monk", "monks"],
+                    ["opponent armor class 3", "armor class 3", "a.c. 3", "ac 3"]
+                ]
+            }}
+        }}
+
+        - Example: query_must with single y-axis name/value pair:
+        {{
+            "query_must": {{
+                "contain_one_of": [
+                    ["temperate", "forest", "woodland"]
+                ],
+                "contain": "encounter"
+            }}
+        }}
+
+        - Example: query_must for psionic table with stat range:
+        {{
+            "query_must": {{
+                "contain_one_of": [
+                    ["psionic", "psionic blast", "psychic", "psionics"],
+                    ["intelligence", "wisdom", "int", "wis"]
+                ],
+                "contain_range": {{"min": 10, "max": 13}}
+            }}
+        }}
+
+        - IMPORTANT: Only add query_must to tables where filtering is useful. Do NOT add query_must to:
+            - General reference tables (strength bonuses, equipment lists, spell descriptions)
+            - Tables with unique data that won't cause search confusion
+            - Single-row tables
+          DO add query_must to:
+            - Attack matrices (multiple AC values)
+            - Encounter tables (multiple terrain types)
+            - Psionic/ability tables (multiple stat ranges)
+            - Any table where multiple variations exist that might confuse semantic search
 
 Preserve the original data values exactly.
 
