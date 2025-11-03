@@ -70,14 +70,32 @@ class DnDRAG:
             print(f"Error getting embedding: {e}")
             raise
     
-    def retrieve(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False):
-        """Retrieve top-k relevant chunks from ChromaDB with entity-aware enhancement.
+    def retrieve(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False, enable_filtering: bool = True, max_iterations: int = 3):
+        """Retrieve top-k relevant chunks from ChromaDB with entity-aware enhancement and optional query_must filtering.
         
         Args:
             query: The search query
             k: Target number of results (used as max, actual may be less if distance threshold exceeded)
             distance_threshold: Maximum distance increase from best result (default 0.4)
                                Results beyond (best_distance + threshold) are dropped
+            debug: If True, print detailed gap detection and filtering info
+            enable_filtering: If True, apply query_must filtering with iterative re-querying (default: True)
+            max_iterations: Maximum iterations for re-querying when filtering is enabled (default: 3)
+        """
+        if enable_filtering:
+            # Use iterative filtering wrapper
+            return self._retrieve_with_filtering(query, k, distance_threshold, debug, max_iterations)
+        else:
+            # Use original retrieval logic
+            return self._retrieve_base(query, k, distance_threshold, debug)
+    
+    def _retrieve_base(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False):
+        """Base retrieval logic without filtering (original implementation).
+        
+        Args:
+            query: The search query
+            k: Target number of results
+            distance_threshold: Maximum distance increase from best result
             debug: If True, print detailed gap detection info
         """
         # Embed the query
@@ -292,6 +310,258 @@ class DnDRAG:
         
         return results
     
+    def _retrieve_with_filtering(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False, max_iterations: int = 3):
+        """Retrieve with iterative query_must filtering.
+        
+        Algorithm:
+        1. Retrieve k chunks using base retrieval
+        2. Filter based on query_must metadata
+        3. If we have < k clean chunks, retrieve more (excluding already-seen chunks)
+        4. Repeat until k chunks OR max_iterations reached
+        5. Apply gap detection and return
+        
+        Args:
+            query: The search query
+            k: Target number of results
+            distance_threshold: Maximum distance increase from best result
+            debug: If True, print detailed filtering info
+            max_iterations: Safety limit on re-query cycles
+            
+        Returns:
+            Results dict in same format as _retrieve_base
+        """
+        import json
+        import time
+        from .query_must_filter import satisfies_query_must
+        
+        start_time = time.time()
+        
+        # Initialize state
+        excluded_ids = set()
+        kept_ids = set()  # Track IDs we've already kept to avoid duplicates
+        all_kept_chunks = []
+        iteration = 0
+        total_excluded = 0
+        
+        # Get embedding once (reuse across iterations)
+        query_embedding = self.get_embedding(query)
+        
+        if debug:
+            print(f"\n[FILTERING] Starting iterative retrieval (k={k}, max_iterations={max_iterations})")
+        
+        while iteration < max_iterations:
+            if debug:
+                print(f"\n[FILTERING] === Iteration {iteration + 1} ===")
+            
+            # Build ChromaDB query parameters
+            query_params = {
+                "query_embeddings": [query_embedding],
+                "n_results": k
+            }
+            
+            # Exclude ALL previously processed chunks (both kept and excluded)
+            # Use metadata.uid instead of document ID since ChromaDB where clause only works on metadata
+            all_seen_ids = excluded_ids | kept_ids
+            if all_seen_ids:
+                query_params["where"] = {"uid": {"$nin": list(all_seen_ids)}}
+                if debug:
+                    print(f"[FILTERING] Excluding {len(all_seen_ids)} previously processed chunks ({len(kept_ids)} kept + {len(excluded_ids)} excluded)")
+            
+            # Retrieve from ChromaDB
+            results = self.collection.query(**query_params)
+            
+            # Check if results returned
+            if not results['ids'][0]:
+                if debug:
+                    print(f"[FILTERING] No more results available from ChromaDB")
+                break
+            
+            # Filter based on query_must
+            newly_kept = []
+            newly_excluded = []
+            
+            for chunk_id, metadata, document, distance in zip(
+                results['ids'][0],
+                results['metadatas'][0],
+                results['documents'][0],
+                results['distances'][0]
+            ):
+                # Extract uid from metadata (fallback to chunk_id if not present for backwards compatibility)
+                uid = metadata.get('uid', chunk_id)
+                
+                # Skip if already kept in a previous iteration (avoid duplicates)
+                if uid in kept_ids:
+                    if debug:
+                        print(f"  ⏭️  SKIP: {metadata.get('title', metadata.get('name', uid))} (duplicate)")
+                    continue
+                
+                # Check if chunk has query_must metadata
+                if 'query_must' in metadata:
+                    try:
+                        # Parse query_must (stored as JSON string in ChromaDB)
+                        query_must = json.loads(metadata['query_must']) if isinstance(metadata['query_must'], str) else metadata['query_must']
+                        
+                        # Check if query satisfies requirements
+                        if satisfies_query_must(query, query_must, debug=debug):
+                            newly_kept.append({
+                                'id': chunk_id,
+                                'metadata': metadata,
+                                'document': document,
+                                'distance': distance
+                            })
+                            kept_ids.add(uid)  # Track by uid
+                            if debug:
+                                print(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))}")
+                        else:
+                            newly_excluded.append(uid)  # Track by uid
+                            excluded_ids.add(uid)  # Track by uid
+                            if debug:
+                                print(f"  ❌ EXCLUDE: {metadata.get('title', metadata.get('name', uid))}")
+                    except json.JSONDecodeError as e:
+                        # If query_must is malformed, keep the chunk (fail open)
+                        if debug:
+                            print(f"  ⚠️  KEEP (malformed query_must): {metadata.get('title', metadata.get('name', uid))}")
+                        newly_kept.append({
+                            'id': chunk_id,
+                            'metadata': metadata,
+                            'document': document,
+                            'distance': distance
+                        })
+                        kept_ids.add(uid)  # Track by uid
+                else:
+                    # No restrictions - always keep
+                    newly_kept.append({
+                        'id': chunk_id,
+                        'metadata': metadata,
+                        'document': document,
+                        'distance': distance
+                    })
+                    kept_ids.add(uid)  # Track by uid
+                    if debug:
+                        print(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))} (no restrictions)")
+            
+            # Add kept chunks to results
+            all_kept_chunks.extend(newly_kept)
+            total_excluded += len(newly_excluded)
+            
+            if debug:
+                print(f"[FILTERING] Kept {len(newly_kept)}, excluded {len(newly_excluded)} (total kept: {len(all_kept_chunks)})")
+            
+            # Check stopping conditions
+            if len(all_kept_chunks) >= k:
+                if debug:
+                    print(f"[FILTERING] Target k={k} reached ({len(all_kept_chunks)} chunks)")
+                break
+            
+            if len(newly_excluded) == 0 and len(newly_kept) == 0:
+                if debug:
+                    print(f"[FILTERING] No new chunks this iteration (all were duplicates), stopping")
+                break
+            
+            if len(newly_excluded) == 0:
+                if debug:
+                    print(f"[FILTERING] No exclusions this iteration, stopping")
+                break
+            
+            iteration += 1
+        
+        # Performance metrics
+        elapsed_time = (time.time() - start_time) * 1000  # Convert to ms
+        
+        if debug:
+            print(f"\n[FILTERING] === Summary ===")
+            print(f"[FILTERING] Iterations: {iteration + 1}")
+            print(f"[FILTERING] Total excluded: {total_excluded}")
+            print(f"[FILTERING] Final kept: {len(all_kept_chunks)}")
+            print(f"[FILTERING] Time: {elapsed_time:.1f}ms")
+        
+        # If no chunks were kept, return empty results
+        if not all_kept_chunks:
+            return {
+                'ids': [[]],
+                'documents': [[]],
+                'metadatas': [[]],
+                'distances': [[]]
+            }
+        
+        # Sort by distance and take top k
+        all_kept_chunks.sort(key=lambda x: x['distance'])
+        final_chunks = all_kept_chunks[:k]
+        
+        # Convert back to ChromaDB results format
+        filtered_results = {
+            'ids': [[chunk['id'] for chunk in final_chunks]],
+            'documents': [[chunk['document'] for chunk in final_chunks]],
+            'metadatas': [[chunk['metadata'] for chunk in final_chunks]],
+            'distances': [[chunk['distance'] for chunk in final_chunks]]
+        }
+        
+        # Now apply the same enhancements as base retrieval:
+        # 1. Entity-aware repositioning (comparison queries)
+        # 2. Parent category injection (monsters)
+        # 3. Adaptive gap detection
+        
+        # Note: These enhancements were already applied in the initial retrieval,
+        # so we just need to apply gap detection to the final filtered set
+        
+        if len(filtered_results['ids'][0]) > 0:
+            distances = filtered_results['distances'][0]
+            
+            # Apply adaptive gap detection (same logic as base retrieval)
+            gaps = []
+            for i in range(2, min(len(distances), k)):
+                gap = distances[i] - distances[i-1]
+                gaps.append((i, gap))
+            
+            max_gap_pos = None
+            max_gap_size = 0
+            gap_threshold = 0.06
+            
+            if gaps:
+                max_gap_pos, max_gap_size = max(gaps, key=lambda x: x[1])
+            
+            if debug and gaps:
+                print(f"  [DEBUG] Gap analysis on filtered results:")
+                for pos, gap in sorted(gaps, key=lambda x: x[1], reverse=True)[:3]:
+                    print(f"    Position {pos}: gap={gap:.4f}")
+            
+            # Decide where to cut
+            keep_count = len(distances)
+            strategy_used = "none"
+            
+            if max_gap_size >= gap_threshold:
+                keep_count = max_gap_pos
+                strategy_used = f"gap detection (cliff at position {max_gap_pos}, gap={max_gap_size:.4f})"
+            else:
+                best_distance = distances[0]
+                cutoff_distance = best_distance + distance_threshold
+                keep_count = 1
+                for i in range(1, len(distances)):
+                    if distances[i] <= cutoff_distance:
+                        keep_count += 1
+                    else:
+                        break
+                strategy_used = f"distance threshold (cutoff={cutoff_distance:.4f})"
+            
+            # Apply constraints
+            original_keep = keep_count
+            keep_count = max(2, keep_count) if len(distances) > 1 else 1
+            keep_count = min(keep_count, k)
+            keep_count = min(keep_count, len(distances))
+            
+            if debug:
+                print(f"  [DEBUG] Strategy: {strategy_used}")
+                print(f"  [DEBUG] Keep count: {original_keep} → {keep_count} (after constraints)")
+            
+            # Trim results
+            if keep_count < len(filtered_results['ids'][0]):
+                filtered_results['ids'][0] = filtered_results['ids'][0][:keep_count]
+                filtered_results['documents'][0] = filtered_results['documents'][0][:keep_count]
+                filtered_results['metadatas'][0] = filtered_results['metadatas'][0][:keep_count]
+                filtered_results['distances'][0] = filtered_results['distances'][0][:keep_count]
+        
+        return filtered_results
+    
     def format_context(self, results):
         """Format retrieved chunks into context for the LLM."""
         contexts = []
@@ -371,15 +641,17 @@ Answer based on the context above:"""
         
         return response.choices[0].message.content
     
-    def query(self, question: str, k: int = 15, distance_threshold: float = 0.4, show_context: bool = False, debug: bool = False):
+    def query(self, question: str, k: int = 15, distance_threshold: float = 0.4, show_context: bool = False, debug: bool = False, enable_filtering: bool = True, max_iterations: int = 3):
         """Full RAG pipeline: retrieve + generate."""
         print(f"\n{'='*80}")
         print(f"QUESTION: {question}")
         print(f"{'='*80}\n")
         
         # Retrieve
-        print(f"Retrieving up to {k} relevant chunks (distance threshold: {distance_threshold})...")
-        results = self.retrieve(question, k=k, distance_threshold=distance_threshold, debug=debug)
+        filter_status = "with filtering" if enable_filtering else "without filtering"
+        print(f"Retrieving up to {k} relevant chunks ({filter_status}, distance threshold: {distance_threshold})...")
+        results = self.retrieve(question, k=k, distance_threshold=distance_threshold, debug=debug, 
+                               enable_filtering=enable_filtering, max_iterations=max_iterations)
         
         # Show retrieved chunks
         print(f"\nRetrieved chunks:")
@@ -450,6 +722,17 @@ def main():
         help="Show debug info about gap detection and filtering"
     )
     parser.add_argument(
+        "--disable-filtering",
+        action="store_true",
+        help="Disable query_must filtering (use base retrieval only)"
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=3,
+        help="Maximum iterations for re-querying when filtering enabled (default: 3)"
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help="Run test questions for the collection"
@@ -484,7 +767,8 @@ def main():
             print(f"\n{'#'*80}")
             print(f"TEST QUESTION {i}/{len(test_questions)}")
             print(f"{'#'*80}")
-            rag.query(question, k=args.k, distance_threshold=args.distance_threshold, show_context=args.show_context, debug=args.debug)
+            rag.query(question, k=args.k, distance_threshold=args.distance_threshold, show_context=args.show_context, debug=args.debug,
+                     enable_filtering=not args.disable_filtering, max_iterations=args.max_iterations)
             
             if i < len(test_questions):
                 input("\nPress Enter to continue to next question...")
@@ -493,7 +777,8 @@ def main():
     
     # Single query mode
     if args.query:
-        rag.query(args.query, k=args.k, distance_threshold=args.distance_threshold, show_context=args.show_context, debug=args.debug)
+        rag.query(args.query, k=args.k, distance_threshold=args.distance_threshold, show_context=args.show_context, debug=args.debug,
+                 enable_filtering=not args.disable_filtering, max_iterations=args.max_iterations)
         sys.exit(0)
     
     # Interactive mode
@@ -516,7 +801,8 @@ def main():
                 print("Goodbye!")
                 break
             
-            rag.query(question, k=args.k, distance_threshold=args.distance_threshold, show_context=args.show_context, debug=args.debug)
+            rag.query(question, k=args.k, distance_threshold=args.distance_threshold, show_context=args.show_context, debug=args.debug,
+                     enable_filtering=not args.disable_filtering, max_iterations=args.max_iterations)
             
         except KeyboardInterrupt:
             print("\n\nGoodbye!")

@@ -18,6 +18,7 @@ Key transformations:
 from typing import Dict, List, Any
 from .base_embedder import Embedder
 import time
+import json
 
 
 class RuleBookEmbedder(Embedder):
@@ -211,6 +212,11 @@ class RuleBookEmbedder(Embedder):
             processed["start_line"] = metadata["start_line"]
         if "end_line" in metadata:
             processed["end_line"] = metadata["end_line"]
+
+        # Query filtering metadata (if present)
+        if "query_must" in metadata:
+            # Store as JSON string since ChromaDB doesn't support nested dicts
+            processed["query_must"] = json.dumps(metadata["query_must"])
 
         return processed
 

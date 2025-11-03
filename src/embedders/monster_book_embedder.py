@@ -6,6 +6,7 @@ Handles statistics prepending and monster-specific metadata extraction.
 """
 
 import time
+import json
 from typing import List, Dict, Any
 
 from .base_embedder import Embedder
@@ -210,6 +211,10 @@ class MonsterBookEmbedder(Embedder):
             "char_count": chunk["metadata"]["char_count"],
             "book": "Monster_Manual_(1e)",
         }
+        
+        # Add uid (for ChromaDB filtering by metadata.uid)
+        if "uid" in chunk["metadata"]:
+            metadata["uid"] = chunk["metadata"]["uid"]
 
         # Add category-specific metadata
         if chunk_type == "category":
@@ -236,6 +241,11 @@ class MonsterBookEmbedder(Embedder):
                 metadata["alignment"] = stats.get("alignment", "")
                 metadata["intelligence"] = stats.get("intelligence", "")
                 metadata["size"] = stats.get("size", "")
+
+        # Query filtering metadata (if present in chunk metadata)
+        if "query_must" in chunk.get("metadata", {}):
+            # Store as JSON string since ChromaDB doesn't support nested dicts
+            metadata["query_must"] = json.dumps(chunk["metadata"]["query_must"])
 
         return metadata
 

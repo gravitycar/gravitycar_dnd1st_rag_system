@@ -20,16 +20,16 @@ import argparse
 import sys
 from pathlib import Path
 
-# Use package imports instead of direct imports
-from gravitycar_dnd1st_rag_system.converters.pdf_converter import convert_pdfs_to_markdown, inspect_markdown_sample
-from gravitycar_dnd1st_rag_system.chunkers.monster_encyclopedia import MonsterEncyclopediaChunker
-from gravitycar_dnd1st_rag_system.chunkers.players_handbook import PlayersHandbookChunker
-from gravitycar_dnd1st_rag_system.chunkers.recursive_chunker import RecursiveChunker
-from gravitycar_dnd1st_rag_system.embedders.embedder_orchestrator import EmbedderOrchestrator
-from gravitycar_dnd1st_rag_system.query.docling_query import DnDRAG
-from gravitycar_dnd1st_rag_system.utils.chromadb_connector import ChromaDBConnector
-from gravitycar_dnd1st_rag_system.preprocessors.heading_organizer import HeadingOrganizer
-from gravitycar_dnd1st_rag_system.transformers.table_transformer import TableTransformer
+# Use src imports for local development
+from src.converters.pdf_converter import convert_pdfs_to_markdown, inspect_markdown_sample
+from src.chunkers.monster_encyclopedia import MonsterEncyclopediaChunker
+from src.chunkers.players_handbook import PlayersHandbookChunker
+from src.chunkers.recursive_chunker import RecursiveChunker
+from src.embedders.embedder_orchestrator import EmbedderOrchestrator
+from src.query.docling_query import DnDRAG
+from src.utils.chromadb_connector import ChromaDBConnector
+from src.preprocessors.heading_organizer import HeadingOrganizer
+from src.transformers.table_transformer import TableTransformer
 
 
 def cmd_convert(args):

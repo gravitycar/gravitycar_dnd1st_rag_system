@@ -20,3 +20,10 @@
     # [('ogre', 0.7), ('umber hulk', 0.68), ('fight', 0.65)]
 ```
 [] include YAML in the markdown that gets copied to metadata in the chunks to help LLM decypher tables. During table conversion to JSON, we can get the LLM doing the converting to provide the instructions for understanding the table.
+[] Rate limiter!
+[] Update query_must for monsters - instead of splitting the name, let's drop any text after " (" and use that for query_must.contain
+[] Apache.
+[] JSON return, with debug/diagnostic output as a separate property from the actual answer.
+[] Update diagnostic output to include which book a chunk comes from.
+[] Convert all of the print/echo calls to a logging object. Ask for a good, generic object we can use. We'll need to store log messages for debug output.
+[] Add a delete collection feature to clear out old test data.

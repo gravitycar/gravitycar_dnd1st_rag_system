@@ -586,20 +586,30 @@ class MonsterEncyclopediaChunker:
                                end_line: int, char_count: int, 
                                desc_char_count: int) -> Dict:
         """Build metadata dict for monster chunk."""
+        uid = self.generate_monster_id(name)  # Reuse existing ID generation
+        
+        # Split name into words for contain_one_of matching
+        # This handles cases like "Gold Dragon (Draco Orientalus Sino Dux)" 
+        # where user might just search "gold dragon"
+        name_words = name.lower().split()
+        
         metadata = {
             'type': 'monster',
-            'monster_id': self.generate_monster_id(name),
+            'uid': uid,  # Use uid instead of monster_id for ChromaDB filtering
             'book': self.book_name,
             'start_line': start_line,
             'end_line': end_line,
             'char_count': char_count,
             'description_char_count': desc_char_count,
-            'line_count': end_line - start_line
+            'line_count': end_line - start_line,
+            'query_must': {
+                'contain_one_of': [name_words]  # Query must contain at least one word from monster name
+            }
         }
         
         if parent_category:
             metadata['parent_category'] = parent_category
-            metadata['parent_category_id'] = parent_category_id
+            metadata['parent_category_id'] = parent_category_id  # Keep for backwards compatibility
         
         return metadata
     
@@ -609,7 +619,8 @@ class MonsterEncyclopediaChunker:
         """Build metadata dict for category chunk."""
         return {
             'type': 'category',
-            'category_id': category_id,
+            'uid': category_id,  # Use uid instead of category_id for ChromaDB filtering
+            'category_id': category_id,  # Keep for backwards compatibility
             'book': self.book_name,
             'start_line': start_line,
             'end_line': end_line,

@@ -297,5 +297,149 @@ This is section 2 content.
             Path(temp_json).unlink(missing_ok=True)
 
 
+class TestQueryMustExtraction:
+    """Tests for _extract_query_must_from_json method."""
+
+    def test_extract_query_must_from_json(self):
+        """Test extracting query_must from JSON object."""
+        builder = ChunkBuilder("TestBook", SpecialCaseRegistry())
+        
+        content = '''
+#### Attack Matrix for Clerics
+
+{
+  "title": "Attack Matrix",
+  "query_must": {
+    "contain_one_of": [
+      ["cleric", "clerics"],
+      ["armor class 6", "ac 6"]
+    ]
+  },
+  "level_1": 10,
+  "level_2": 9
+}
+'''
+        
+        query_must, cleaned = builder._extract_query_must_from_json(content)
+        
+        # Verify query_must was extracted
+        assert query_must is not None
+        assert "contain_one_of" in query_must
+        assert len(query_must["contain_one_of"]) == 2
+        
+        # Verify query_must was removed from content
+        assert "query_must" not in cleaned
+        assert "level_1" in cleaned
+        assert "level_2" in cleaned
+
+    def test_no_query_must_in_json(self):
+        """Test content without query_must remains unchanged."""
+        builder = ChunkBuilder("TestBook", SpecialCaseRegistry())
+        
+        content = '''
+#### Strength Table
+
+{
+  "title": "Strength Bonuses",
+  "strength_18": "+3"
+}
+'''
+        
+        query_must, cleaned = builder._extract_query_must_from_json(content)
+        
+        # Verify no query_must found
+        assert query_must is None
+        # Verify content unchanged (except whitespace from JSON parsing)
+        assert "Strength Table" in cleaned
+        assert "strength_18" in cleaned
+
+    def test_no_json_in_content(self):
+        """Test plain text content without JSON."""
+        builder = ChunkBuilder("TestBook", SpecialCaseRegistry())
+        
+        content = '''
+This is a plain text description with no JSON objects.
+It should remain completely unchanged.
+'''
+        
+        query_must, cleaned = builder._extract_query_must_from_json(content)
+        
+        # Verify no extraction occurred
+        assert query_must is None
+        assert cleaned == content
+
+    def test_multiple_json_objects_extracts_first(self):
+        """Test that only first query_must is extracted from multiple objects."""
+        builder = ChunkBuilder("TestBook", SpecialCaseRegistry())
+        
+        content = '''
+{
+  "title": "First Object",
+  "query_must": {
+    "contain": "first"
+  }
+}
+
+{
+  "title": "Second Object",
+  "query_must": {
+    "contain": "second"
+  }
+}
+'''
+        
+        query_must, cleaned = builder._extract_query_must_from_json(content)
+        
+        # Verify first query_must was extracted
+        assert query_must is not None
+        assert query_must.get("contain") == "first"
+        
+        # Verify both objects have query_must removed
+        cleaned_lower = cleaned.lower()
+        assert cleaned_lower.count("query_must") == 0
+
+    def test_invalid_json_handled_gracefully(self):
+        """Test that invalid JSON doesn't break extraction."""
+        builder = ChunkBuilder("TestBook", SpecialCaseRegistry())
+        
+        content = '''
+This has a malformed "query_must" reference but not valid JSON.
+{invalid json here}
+'''
+        
+        query_must, cleaned = builder._extract_query_must_from_json(content)
+        
+        # Verify graceful handling
+        assert query_must is None
+        assert cleaned == content
+
+    def test_contain_range_operator(self):
+        """Test extraction of contain_range operator."""
+        builder = ChunkBuilder("TestBook", SpecialCaseRegistry())
+        
+        content = '''
+{
+  "title": "Psionic Table",
+  "query_must": {
+    "contain_one_of": [["psionic"]],
+    "contain_range": {"min": 10, "max": 13}
+  },
+  "attack_bonus": 5
+}
+'''
+        
+        query_must, cleaned = builder._extract_query_must_from_json(content)
+        
+        # Verify contain_range was extracted
+        assert query_must is not None
+        assert "contain_range" in query_must
+        assert query_must["contain_range"]["min"] == 10
+        assert query_must["contain_range"]["max"] == 13
+        
+        # Verify query_must removed but data preserved
+        assert "query_must" not in cleaned
+        assert "attack_bonus" in cleaned
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
