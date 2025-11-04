@@ -1,0 +1,67 @@
+RewriteEngine On
+RewriteBase /
+
+# Rule to enable "Let's Encrypt" to find its  temporary "challenge" file.
+# This file will be located in the /.well-known/acme-challenge directory on your site (e.g. "http://www.example.com/.well-known/acme-challenge/filename")
+# See https://faq.he.net/index.php/Let%27s_Encrypt
+RewriteRule ^.well-known/ - [L,NC]
+
+
+# Ultra-simple diagnostic test with RewriteBase
+# This should prevent the infinite redirect loop
+
+# Serve favicon.ico directly without routing to API
+RewriteRule ^favicon\.ico$ favicon.ico [L]
+
+# Skip rewriting if already at rest_api.php
+RewriteCond %{REQUEST_URI} !^/rest_api\.php$
+# Capture model name and path info for the application router
+#RewriteRule ^([A-Za-z][A-Za-z0-9_]*)(/.+)?/?$ debug.php [E=ORIGINAL_PATH:%{REQUEST_URI},E=MODEL_NAME:$1,E=PATH_INFO:$2,QSA,L]
+
+# Capture model name and path info using query parameters instead of environment variables
+#RewriteRule ^([A-Za-z][A-Za-z0-9_]*)(/.+)?/?$ rest_api.php?modelName=$1&pathInfo=$2 [QSA,L]
+
+# Alternative fallback for exact model name matches
+# This ensures clean URLs work for common REST patterns
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} ^/[A-Za-z][A-Za-z0-9_]*
+RewriteRule ^(.*)$ rest_api.php [E=ORIGINAL_PATH:%{REQUEST_URI},QSA,L]
+
+
+# Ensure Authorization header is passed through to PHP
+RewriteCond %{HTTP:Authorization} ^(.*)
+RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
+# CORS headers for API access
+Header always set Access-Control-Allow-Origin "https://react.gravitycar.com"
+Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+Header always set Access-Control-Allow-Credentials "true"
+
+# Security headers
+Header always set X-Content-Type-Options nosniff
+Header always set X-Frame-Options DENY
+Header always set X-XSS-Protection "1; mode=block"
+Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+
+# Block access to sensitive files
+<Files ~ "^\.">
+    Order allow,deny
+    Deny from all
+</Files>
+
+<FilesMatch "\.(log|sql|md|sh)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+
+# Don't display errors in output
+php_flag display_errors off
+
+# Log errors to ~/php_errors.log
+php_flag log_errors on
+php_value error_log /home/gravityc/php_errors.log
+php_value error_reporting -1

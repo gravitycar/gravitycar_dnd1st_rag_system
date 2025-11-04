@@ -163,9 +163,12 @@ def cmd_truncate(args):
 
 def cmd_query(args):
     """Query a ChromaDB collection."""
-    print(f"Querying collection: {args.collection_name}")
-
+    from src.utils.rag_output import RAGOutput
     
+    print(f"Querying collection: {args.collection_name}")
+    
+    # Don't pass output buffer to DnDRAG constructor (it will create its own)
+    # We'll create fresh ones for each query below
     rag = DnDRAG(collection_name=args.collection_name, model=args.model)
     
     if args.test:
@@ -187,13 +190,61 @@ def cmd_query(args):
             print(f"\n{'='*60}")
             print(f"TEST: {question}")
             print('='*60)
-            rag.query(question, k=args.k, distance_threshold=args.distance_threshold, 
+            
+            # Create fresh output buffer for this query
+            rag.output = RAGOutput()
+            
+            # Query returns dict now
+            result = rag.query(question, k=args.k, distance_threshold=args.distance_threshold, 
                      show_context=args.show_context, debug=args.debug)
+            
+            # Print diagnostics if debug mode
+            if args.debug and result['diagnostics']:
+                print("\n[DIAGNOSTICS]")
+                for msg in result['diagnostics']:
+                    print(msg)
+            
+            # Print answer
+            if result['answer']:
+                print(f"\n{'='*80}")
+                print("ANSWER:")
+                print(f"{'='*80}")
+                print(result['answer'])
+                print(f"{'='*80}\n")
+            
+            # Print errors if any
+            if result['errors']:
+                print("\n[ERRORS]")
+                for msg in result['errors']:
+                    print(msg)
     else:
         # Single query or interactive mode
         if args.question:
-            rag.query(args.question, k=args.k, distance_threshold=args.distance_threshold,
+            # Create fresh output buffer for this query
+            rag.output = RAGOutput()
+            
+            result = rag.query(args.question, k=args.k, distance_threshold=args.distance_threshold,
                      show_context=args.show_context, debug=args.debug)
+            
+            # Print diagnostics if debug mode
+            if args.debug and result['diagnostics']:
+                print("\n[DIAGNOSTICS]")
+                for msg in result['diagnostics']:
+                    print(msg)
+            
+            # Print answer
+            if result['answer']:
+                print(f"\n{'='*80}")
+                print("ANSWER:")
+                print(f"{'='*80}")
+                print(result['answer'])
+                print(f"{'='*80}\n")
+            
+            # Print errors if any
+            if result['errors']:
+                print("\n[ERRORS]")
+                for msg in result['errors']:
+                    print(msg)
         else:
             # Interactive mode
             print("\nInteractive mode - enter questions (or 'quit' to exit)")
@@ -205,8 +256,32 @@ def cmd_query(args):
                     if question.lower() in ['quit', 'exit', 'q']:
                         print("Goodbye!")
                         break
-                    rag.query(question, k=args.k, distance_threshold=args.distance_threshold,
+                    
+                    # Create fresh output buffer for this query
+                    rag.output = RAGOutput()
+                    
+                    result = rag.query(question, k=args.k, distance_threshold=args.distance_threshold,
                              show_context=args.show_context, debug=args.debug)
+                    
+                    # Print diagnostics if debug mode
+                    if args.debug and result['diagnostics']:
+                        print("\n[DIAGNOSTICS]")
+                        for msg in result['diagnostics']:
+                            print(msg)
+                    
+                    # Print answer
+                    if result['answer']:
+                        print(f"\n{'='*80}")
+                        print("ANSWER:")
+                        print(f"{'='*80}")
+                        print(result['answer'])
+                        print(f"{'='*80}\n")
+                    
+                    # Print errors if any
+                    if result['errors']:
+                        print("\n[ERRORS]")
+                        for msg in result['errors']:
+                            print(msg)
                 except KeyboardInterrupt:
                     print("\nGoodbye!")
                     break

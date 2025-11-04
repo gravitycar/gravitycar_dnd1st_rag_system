@@ -15,6 +15,7 @@ import sys
 # Import our centralized configuration
 from ..utils.config import get_openai_api_key, get_default_collection_name
 from ..utils.chromadb_connector import ChromaDBConnector
+from ..utils.rag_output import RAGOutput
 
 
 class DnDRAG:
@@ -23,8 +24,12 @@ class DnDRAG:
         collection_name: str = None,
         model: str = "gpt-4o-mini",
         chroma_host: str = None,
-        chroma_port: int = None
+        chroma_port: int = None,
+        output: RAGOutput = None
     ):
+        # Initialize output buffer (create new instance if not provided)
+        self.output = output if output else RAGOutput()
+        
         # Use default collection name if not provided
         if collection_name is None:
             collection_name = get_default_collection_name()
@@ -33,28 +38,28 @@ class DnDRAG:
         
         api_key = get_openai_api_key()
         
-        print(f"Initializing D&D RAG system...")
-        print(f"  Collection: {collection_name}")
-        print(f"  Model: {model}")
+        self.output.info(f"Initializing D&D RAG system...")
+        self.output.info(f"  Collection: {collection_name}")
+        self.output.info(f"  Model: {model}")
         
         # Initialize OpenAI client
         self.openai_client = OpenAI(api_key=api_key)
         
         # Set OpenAI embedding model (must match the model used for embedding)
         self.embedding_model_name = "text-embedding-3-small"
-        print(f"  Using OpenAI embedding model: {self.embedding_model_name}")
+        self.output.info(f"  Using OpenAI embedding model: {self.embedding_model_name}")
         
         # Connect to ChromaDB using connector
-        print(f"  Connecting to ChromaDB...")
+        self.output.info(f"  Connecting to ChromaDB...")
         self.chroma = ChromaDBConnector(chroma_host, chroma_port)
-        print(f"  ChromaDB: {self.chroma.chroma_host}:{self.chroma.chroma_port}")
+        self.output.info(f"  ChromaDB: {self.chroma.chroma_host}:{self.chroma.chroma_port}")
         
         try:
             self.collection = self.chroma.get_collection(collection_name)
-            print(f"  ✅ Connected to collection: {collection_name}")
+            self.output.info(f"  ✅ Connected to collection: {collection_name}")
         except Exception as e:
-            print(f"  ❌ Error: Collection '{collection_name}' not found")
-            print(f"     Available collections: {[c.name for c in self.chroma.list_collections()]}")
+            self.output.error(f"  ❌ Error: Collection '{collection_name}' not found")
+            self.output.error(f"     Available collections: {[c.name for c in self.chroma.list_collections()]}")
             raise
     
     def get_embedding(self, text: str):
@@ -67,7 +72,7 @@ class DnDRAG:
             )
             return response.data[0].embedding
         except Exception as e:
-            print(f"Error getting embedding: {e}")
+            self.output.error(f"Error getting embedding: {e}")
             raise
     
     def retrieve(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False, enable_filtering: bool = True, max_iterations: int = 3):
@@ -264,10 +269,10 @@ class DnDRAG:
                 max_gap_pos, max_gap_size = max(gaps, key=lambda x: x[1])
             
             if debug and gaps:
-                print(f"  [DEBUG] Gap analysis:")
+                self.output.info(f"  [DEBUG] Gap analysis:")
                 for pos, gap in sorted(gaps, key=lambda x: x[1], reverse=True)[:3]:
-                    print(f"    Position {pos}: gap={gap:.4f}")
-                print(f"  [DEBUG] Largest gap: {max_gap_size:.4f} at position {max_gap_pos}")
+                    self.output.info(f"    Position {pos}: gap={gap:.4f}")
+                self.output.info(f"  [DEBUG] Largest gap: {max_gap_size:.4f} at position {max_gap_pos}")
                 
             # Decide where to cut
             keep_count = len(distances)  # Default: keep all
@@ -296,10 +301,10 @@ class DnDRAG:
             keep_count = min(keep_count, len(distances))  # Can't exceed what we have
             
             if debug:
-                print(f"  [DEBUG] Strategy: {strategy_used}")
-                print(f"  [DEBUG] Keep count: {original_keep} → {keep_count} (after constraints)")
+                self.output.info(f"  [DEBUG] Strategy: {strategy_used}")
+                self.output.info(f"  [DEBUG] Keep count: {original_keep} → {keep_count} (after constraints)")
                 if keep_count < len(distances):
-                    print(f"  [DEBUG] Dropping {len(distances) - keep_count} results with distances: {distances[keep_count:]}")
+                    self.output.info(f"  [DEBUG] Dropping {len(distances) - keep_count} results with distances: {distances[keep_count:]}")
             
             # Trim results
             if keep_count < len(results['ids'][0]):
@@ -347,11 +352,11 @@ class DnDRAG:
         query_embedding = self.get_embedding(query)
         
         if debug:
-            print(f"\n[FILTERING] Starting iterative retrieval (k={k}, max_iterations={max_iterations})")
+            self.output.info(f"\n[FILTERING] Starting iterative retrieval (k={k}, max_iterations={max_iterations})")
         
         while iteration < max_iterations:
             if debug:
-                print(f"\n[FILTERING] === Iteration {iteration + 1} ===")
+                self.output.info(f"\n[FILTERING] === Iteration {iteration + 1} ===")
             
             # Build ChromaDB query parameters
             query_params = {
@@ -365,7 +370,7 @@ class DnDRAG:
             if all_seen_ids:
                 query_params["where"] = {"uid": {"$nin": list(all_seen_ids)}}
                 if debug:
-                    print(f"[FILTERING] Excluding {len(all_seen_ids)} previously processed chunks ({len(kept_ids)} kept + {len(excluded_ids)} excluded)")
+                    self.output.info(f"[FILTERING] Excluding {len(all_seen_ids)} previously processed chunks ({len(kept_ids)} kept + {len(excluded_ids)} excluded)")
             
             # Retrieve from ChromaDB
             results = self.collection.query(**query_params)
@@ -373,7 +378,7 @@ class DnDRAG:
             # Check if results returned
             if not results['ids'][0]:
                 if debug:
-                    print(f"[FILTERING] No more results available from ChromaDB")
+                    self.output.info(f"[FILTERING] No more results available from ChromaDB")
                 break
             
             # Filter based on query_must
@@ -392,7 +397,7 @@ class DnDRAG:
                 # Skip if already kept in a previous iteration (avoid duplicates)
                 if uid in kept_ids:
                     if debug:
-                        print(f"  ⏭️  SKIP: {metadata.get('title', metadata.get('name', uid))} (duplicate)")
+                        self.output.info(f"  ⏭️  SKIP: {metadata.get('title', metadata.get('name', uid))} (duplicate)")
                     continue
                 
                 # Check if chunk has query_must metadata
@@ -411,16 +416,16 @@ class DnDRAG:
                             })
                             kept_ids.add(uid)  # Track by uid
                             if debug:
-                                print(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))}")
+                                self.output.info(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))}")
                         else:
                             newly_excluded.append(uid)  # Track by uid
                             excluded_ids.add(uid)  # Track by uid
                             if debug:
-                                print(f"  ❌ EXCLUDE: {metadata.get('title', metadata.get('name', uid))}")
+                                self.output.info(f"  ❌ EXCLUDE: {metadata.get('title', metadata.get('name', uid))}")
                     except json.JSONDecodeError as e:
                         # If query_must is malformed, keep the chunk (fail open)
                         if debug:
-                            print(f"  ⚠️  KEEP (malformed query_must): {metadata.get('title', metadata.get('name', uid))}")
+                            self.output.info(f"  ⚠️  KEEP (malformed query_must): {metadata.get('title', metadata.get('name', uid))}")
                         newly_kept.append({
                             'id': chunk_id,
                             'metadata': metadata,
@@ -438,29 +443,29 @@ class DnDRAG:
                     })
                     kept_ids.add(uid)  # Track by uid
                     if debug:
-                        print(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))} (no restrictions)")
+                        self.output.info(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))} (no restrictions)")
             
             # Add kept chunks to results
             all_kept_chunks.extend(newly_kept)
             total_excluded += len(newly_excluded)
             
             if debug:
-                print(f"[FILTERING] Kept {len(newly_kept)}, excluded {len(newly_excluded)} (total kept: {len(all_kept_chunks)})")
+                self.output.info(f"[FILTERING] Kept {len(newly_kept)}, excluded {len(newly_excluded)} (total kept: {len(all_kept_chunks)})")
             
             # Check stopping conditions
             if len(all_kept_chunks) >= k:
                 if debug:
-                    print(f"[FILTERING] Target k={k} reached ({len(all_kept_chunks)} chunks)")
+                    self.output.info(f"[FILTERING] Target k={k} reached ({len(all_kept_chunks)} chunks)")
                 break
             
             if len(newly_excluded) == 0 and len(newly_kept) == 0:
                 if debug:
-                    print(f"[FILTERING] No new chunks this iteration (all were duplicates), stopping")
+                    self.output.info(f"[FILTERING] No new chunks this iteration (all were duplicates), stopping")
                 break
             
             if len(newly_excluded) == 0:
                 if debug:
-                    print(f"[FILTERING] No exclusions this iteration, stopping")
+                    self.output.info(f"[FILTERING] No exclusions this iteration, stopping")
                 break
             
             iteration += 1
@@ -469,11 +474,11 @@ class DnDRAG:
         elapsed_time = (time.time() - start_time) * 1000  # Convert to ms
         
         if debug:
-            print(f"\n[FILTERING] === Summary ===")
-            print(f"[FILTERING] Iterations: {iteration + 1}")
-            print(f"[FILTERING] Total excluded: {total_excluded}")
-            print(f"[FILTERING] Final kept: {len(all_kept_chunks)}")
-            print(f"[FILTERING] Time: {elapsed_time:.1f}ms")
+            self.output.info(f"\n[FILTERING] === Summary ===")
+            self.output.info(f"[FILTERING] Iterations: {iteration + 1}")
+            self.output.info(f"[FILTERING] Total excluded: {total_excluded}")
+            self.output.info(f"[FILTERING] Final kept: {len(all_kept_chunks)}")
+            self.output.info(f"[FILTERING] Time: {elapsed_time:.1f}ms")
         
         # If no chunks were kept, return empty results
         if not all_kept_chunks:
@@ -521,9 +526,9 @@ class DnDRAG:
                 max_gap_pos, max_gap_size = max(gaps, key=lambda x: x[1])
             
             if debug and gaps:
-                print(f"  [DEBUG] Gap analysis on filtered results:")
+                self.output.info(f"  [DEBUG] Gap analysis on filtered results:")
                 for pos, gap in sorted(gaps, key=lambda x: x[1], reverse=True)[:3]:
-                    print(f"    Position {pos}: gap={gap:.4f}")
+                    self.output.info(f"    Position {pos}: gap={gap:.4f}")
             
             # Decide where to cut
             keep_count = len(distances)
@@ -550,8 +555,8 @@ class DnDRAG:
             keep_count = min(keep_count, len(distances))
             
             if debug:
-                print(f"  [DEBUG] Strategy: {strategy_used}")
-                print(f"  [DEBUG] Keep count: {original_keep} → {keep_count} (after constraints)")
+                self.output.info(f"  [DEBUG] Strategy: {strategy_used}")
+                self.output.info(f"  [DEBUG] Keep count: {original_keep} → {keep_count} (after constraints)")
             
             # Trim results
             if keep_count < len(filtered_results['ids'][0]):
@@ -643,46 +648,48 @@ Answer based on the context above:"""
     
     def query(self, question: str, k: int = 15, distance_threshold: float = 0.4, show_context: bool = False, debug: bool = False, enable_filtering: bool = True, max_iterations: int = 3):
         """Full RAG pipeline: retrieve + generate."""
-        print(f"\n{'='*80}")
-        print(f"QUESTION: {question}")
-        print(f"{'='*80}\n")
+        self.output.info(f"\n{'='*80}")
+        self.output.info(f"QUESTION: {question}")
+        self.output.info(f"{'='*80}\n")
         
         # Retrieve
         filter_status = "with filtering" if enable_filtering else "without filtering"
-        print(f"Retrieving up to {k} relevant chunks ({filter_status}, distance threshold: {distance_threshold})...")
+        self.output.info(f"Retrieving up to {k} relevant chunks ({filter_status}, distance threshold: {distance_threshold})...")
         results = self.retrieve(question, k=k, distance_threshold=distance_threshold, debug=debug, 
                                enable_filtering=enable_filtering, max_iterations=max_iterations)
         
         # Show retrieved chunks
-        print(f"\nRetrieved chunks:")
+        self.output.info(f"\nRetrieved chunks:")
         for i, (metadata, distance) in enumerate(zip(
             results['metadatas'][0],
             results['distances'][0]
         )):
-            print(f"  {i+1}. {metadata.get('name', metadata.get('title', 'Unknown'))} "
+            self.output.info(f"  {i+1}. {metadata.get('name', metadata.get('title', 'Unknown'))} "
                   f"(type: {metadata.get('type', 'N/A')}, distance: {distance:.4f})")
         
         # Format context
         context = self.format_context(results)
         
         if show_context:
-            print(f"\n{'='*80}")
-            print("CONTEXT SENT TO LLM:")
-            print(f"{'='*80}")
-            print(context)
-            print(f"{'='*80}\n")
+            self.output.info(f"\n{'='*80}")
+            self.output.info("CONTEXT SENT TO LLM:")
+            self.output.info(f"{'='*80}")
+            self.output.info(context)
+            self.output.info(f"{'='*80}\n")
         
         # Generate answer
-        print(f"\nGenerating answer with {self.model}...")
+        self.output.info(f"\nGenerating answer with {self.model}...")
         answer = self.generate(question, context)
         
-        print(f"\n{'='*80}")
-        print("ANSWER:")
-        print(f"{'='*80}")
-        print(answer)
-        print(f"{'='*80}\n")
+        self.output.info(f"\n{'='*80}")
+        self.output.info("ANSWER:")
+        self.output.info(f"{'='*80}")
+        self.output.info(answer)
+        self.output.info(f"{'='*80}\n")
         
-        return answer
+        # Store answer and return dict
+        self.output.set_answer(answer)
+        return self.output.to_dict()
 
 
 def main():

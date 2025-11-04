@@ -24,6 +24,8 @@
 [] Update query_must for monsters - instead of splitting the name, let's drop any text after " (" and use that for query_must.contain
 [] Apache.
 [] JSON return, with debug/diagnostic output as a separate property from the actual answer.
-[] Update diagnostic output to include which book a chunk comes from.
+[] Update diagnostic output to include which book a chunk comes from, and the complete heading hierarchy.
 [] Convert all of the print/echo calls to a logging object. Ask for a good, generic object we can use. We'll need to store log messages for debug output.
 [] Add a delete collection feature to clear out old test data.
+[] Add another feature to chunk metadata, "further reading" or something like that, where we can add a reference to a chunk that will be relevant even if it's not semantically similar.
+[] Maybe reduce the minimum number of chunks to zero instead of two. 
