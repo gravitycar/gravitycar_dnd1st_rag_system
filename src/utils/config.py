@@ -148,6 +148,75 @@ class ConfigManager:
             else:
                 print("OpenAI API key: Not set")
         print("==============================\n")
+    
+    def get_env_string(self, key: str, default: str = None) -> str:
+        """
+        Get string environment variable.
+        
+        Args:
+            key: Environment variable name
+            default: Default value if not found
+            
+        Returns:
+            str: Environment variable value or default
+        """
+        return os.getenv(key, default)
+    
+    def get_env_int(self, key: str, default: int) -> int:
+        """
+        Get integer environment variable.
+        
+        Args:
+            key: Environment variable name
+            default: Default value if not found or invalid
+            
+        Returns:
+            int: Environment variable value or default
+        """
+        value = os.getenv(key)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            print(f"Warning: Invalid integer value for {key}, using default {default}")
+            return default
+    
+    def get_env_float(self, key: str, default: float) -> float:
+        """
+        Get float environment variable.
+        
+        Args:
+            key: Environment variable name
+            default: Default value if not found or invalid
+            
+        Returns:
+            float: Environment variable value or default
+        """
+        value = os.getenv(key)
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            print(f"Warning: Invalid float value for {key}, using default {default}")
+            return default
+    
+    def get_env_bool(self, key: str, default: bool) -> bool:
+        """
+        Get boolean environment variable.
+        
+        Args:
+            key: Environment variable name
+            default: Default value if not found
+            
+        Returns:
+            bool: True if value is 'true', '1', 'yes', 'on' (case-insensitive)
+        """
+        value = os.getenv(key)
+        if value is None:
+            return default
+        return value.lower() in ('true', '1', 'yes', 'on')
 
 
 # Global singleton instance for easy import
@@ -182,6 +251,26 @@ def get_default_collection_name() -> str:
         str: Default collection name for AD&D 1st Edition content
     """
     return config.get_default_collection_name()
+
+
+def get_env_string(key: str, default: str = None) -> str:
+    """Convenience function for getting string environment variable."""
+    return config.get_env_string(key, default)
+
+
+def get_env_int(key: str, default: int) -> int:
+    """Convenience function for getting integer environment variable."""
+    return config.get_env_int(key, default)
+
+
+def get_env_float(key: str, default: float) -> float:
+    """Convenience function for getting float environment variable."""
+    return config.get_env_float(key, default)
+
+
+def get_env_bool(key: str, default: bool) -> bool:
+    """Convenience function for getting boolean environment variable."""
+    return config.get_env_bool(key, default)
 
 
 if __name__ == "__main__":

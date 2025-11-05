@@ -3,12 +3,13 @@
 ChromaDB Connector: Centralized ChromaDB connection and operations.
 
 Provides a single source of truth for all ChromaDB interactions:
-- Connection management
+- Connection management (local HTTP or ChromaCloud)
 - Collection operations (create, get, delete, list, truncate)
 - Shared across embedders, CLI, and query modules
 """
 
 import chromadb
+import os
 from typing import Optional, List, Dict, Any
 from ..utils.config import get_chroma_connection_params
 
@@ -30,24 +31,59 @@ class ChromaDBConnector:
     def __init__(
         self,
         chroma_host: Optional[str] = None,
-        chroma_port: Optional[int] = None
+        chroma_port: Optional[int] = None,
+        use_cloud: Optional[bool] = None
     ):
         """
-        Initialize ChromaDB connection.
+        Initialize ChromaDB connection (local or cloud).
+        
+        Auto-detects cloud mode if chroma_cloud_api_key is set in environment.
         
         Args:
             chroma_host: ChromaDB host (optional, uses config default)
             chroma_port: ChromaDB port (optional, uses config default)
+            use_cloud: Force cloud mode (optional, auto-detects from env)
         """
-        # Get configuration from centralized config utility
-        if chroma_host is None or chroma_port is None:
-            chroma_host, chroma_port = get_chroma_connection_params()
+        # Check if cloud credentials are available
+        cloud_api_key = os.getenv('chroma_cloud_api_key')
+        cloud_tenant = os.getenv('chroma_cloud_tenant_id')
+        cloud_database = os.getenv('chroma_cloud_database', 'default_database')
         
-        self.chroma_host = chroma_host
-        self.chroma_port = chroma_port
+        # Auto-detect cloud mode if credentials present
+        if use_cloud is None:
+            use_cloud = bool(cloud_api_key and cloud_tenant)
         
-        # Create HTTP client
-        self.client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
+        self.use_cloud = use_cloud
+        
+        if use_cloud:
+            # ChromaCloud mode
+            if not cloud_api_key or not cloud_tenant:
+                raise ValueError(
+                    "ChromaCloud mode requires chroma_cloud_api_key and "
+                    "chroma_cloud_tenant_id in environment"
+                )
+            
+            self.chroma_host = "cloud"
+            self.chroma_port = 443
+            self.cloud_tenant = cloud_tenant
+            self.cloud_database = cloud_database
+            
+            print(f"Connecting to ChromaCloud (tenant: {cloud_tenant}, database: {cloud_database})")
+            self.client = chromadb.CloudClient(
+                api_key=cloud_api_key,
+                tenant=cloud_tenant,
+                database=cloud_database
+            )
+        else:
+            # Local HTTP mode
+            if chroma_host is None or chroma_port is None:
+                chroma_host, chroma_port = get_chroma_connection_params()
+            
+            self.chroma_host = chroma_host
+            self.chroma_port = chroma_port
+            
+            print(f"Connecting to local ChromaDB ({chroma_host}:{chroma_port})")
+            self.client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
     
     def get_collection(self, name: str):
         """
@@ -216,4 +252,7 @@ class ChromaDBConnector:
     
     def __repr__(self) -> str:
         """String representation of connector."""
-        return f"ChromaDBConnector(host={self.chroma_host}, port={self.chroma_port})"
+        if self.use_cloud:
+            return f"ChromaDBConnector(cloud, tenant={self.cloud_tenant}, database={self.cloud_database})"
+        else:
+            return f"ChromaDBConnector(host={self.chroma_host}, port={self.chroma_port})"
