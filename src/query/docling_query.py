@@ -644,7 +644,15 @@ Answer based on the context above:"""
             temperature=0.1  # Lower temperature for more factual responses
         )
         
-        return response.choices[0].message.content
+        # Return both content and token usage
+        return {
+            'content': response.choices[0].message.content,
+            'usage': {
+                'prompt_tokens': response.usage.prompt_tokens,
+                'completion_tokens': response.usage.completion_tokens,
+                'total_tokens': response.usage.total_tokens
+            }
+        }
     
     def query(self, question: str, k: int = 15, distance_threshold: float = 0.4, show_context: bool = False, debug: bool = False, enable_filtering: bool = True, max_iterations: int = 3):
         """Full RAG pipeline: retrieve + generate."""
@@ -679,7 +687,9 @@ Answer based on the context above:"""
         
         # Generate answer
         self.output.info(f"\nGenerating answer with {self.model}...")
-        answer = self.generate(question, context)
+        generation_result = self.generate(question, context)
+        answer = generation_result['content']
+        usage = generation_result['usage']
         
         self.output.info(f"\n{'='*80}")
         self.output.info("ANSWER:")
@@ -687,9 +697,12 @@ Answer based on the context above:"""
         self.output.info(answer)
         self.output.info(f"{'='*80}\n")
         
-        # Store answer and return dict
+        # Store answer and usage
         self.output.set_answer(answer)
-        return self.output.to_dict()
+        result_dict = self.output.to_dict()
+        result_dict['usage'] = usage  # Add usage to output
+        
+        return result_dict
 
 
 def main():

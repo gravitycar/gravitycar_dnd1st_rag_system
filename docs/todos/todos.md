@@ -28,4 +28,5 @@
 [] Convert all of the print/echo calls to a logging object. Ask for a good, generic object we can use. We'll need to store log messages for debug output.
 [] Add a delete collection feature to clear out old test data.
 [] Add another feature to chunk metadata, "further reading" or something like that, where we can add a reference to a chunk that will be relevant even if it's not semantically similar.
-[] Maybe reduce the minimum number of chunks to zero instead of two. 
+[] Need to know - can I update the metadata for just one chunk? Can I retrieve just one chunk by chunk ID or similar
+[] Maybe reduce the minimum number of chunks to zero instead of two. ?
