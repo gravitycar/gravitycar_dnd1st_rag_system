@@ -4,6 +4,10 @@ Query-Must Filter for RAG Pipeline.
 
 Implements post-retrieval filtering based on query_must metadata.
 Enables surgical filtering of semantically similar but contextually irrelevant chunks.
+
+NOTE: Reference chunks (type='reference', section='EXPLANATORY NOTES') bypass
+query_must filtering in docling_query.py. This module only validates the operators;
+the decision to skip filtering is made at the pipeline level.
 """
 
 import re
@@ -112,7 +116,9 @@ def validate_contain(query: str, query_must: Dict[str, Any]) -> bool:
     Logic: The specified term must appear in the query.
     This is the simplest operator - use for single-term requirements.
     
-    Uses word boundaries to prevent partial matches (e.g., "bear" won't match "owlbear").
+    Uses word boundaries at the start to prevent partial matches (e.g., "bear" won't 
+    match "owlbear"), but allows plural forms at the end (e.g., "gold dragon" matches 
+    "gold dragons").
     
     Args:
         query: User's natural language query
@@ -130,15 +136,25 @@ def validate_contain(query: str, query_must: Dict[str, Any]) -> bool:
         >>> query = "magic missile"
         >>> validate_contain(query, query_must)
         False
+        
+        >>> query = "tell me about gold dragons"
+        >>> query_must = {"contain": "gold dragon"}
+        >>> validate_contain(query, query_must)
+        True
     """
     if "contain" not in query_must:
         return True  # No requirement, pass through
     
     query_lower = query.lower()
     term_lower = str(query_must["contain"]).lower()
-    # Escape special regex characters and add word boundaries
-    pattern = r'\b' + re.escape(term_lower) + r'\b'
+    
+    # Escape special regex characters and add word boundary at start
+    # Allow optional 's' at end for plurals, with word boundary after
+    escaped_term = re.escape(term_lower)
+    pattern = r'\b' + escaped_term + r's?\b'
+    
     return bool(re.search(pattern, query_lower))
+
 
 
 def validate_contain_range(query: str, query_must: Dict[str, Any]) -> bool:

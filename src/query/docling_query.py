@@ -75,6 +75,37 @@ class DnDRAG:
             self.output.error(f"Error getting embedding: {e}")
             raise
     
+    def _format_chunk_info(self, metadata: dict, current_num: int = None, total_num: int = None) -> str:
+        """Format chunk information for diagnostic messages.
+        
+        Args:
+            metadata: Chunk metadata dict
+            current_num: Current chunk number (1-indexed)
+            total_num: Total number of chunks
+            
+        Returns:
+            Formatted string with: "NAME [book: BOOK] [hierarchy] [chunk X of Y]"
+        """
+        # Get chunk name/title
+        name = metadata.get('title', metadata.get('name', 'Unknown'))
+        
+        # Get book name
+        book = metadata.get('book', 'Unknown')
+        
+        # Get heading hierarchy (may be stored as 'hierarchy' or 'heading_hierarchy')
+        hierarchy = metadata.get('hierarchy', metadata.get('heading_hierarchy', ''))
+        if hierarchy:
+            hierarchy_str = f" [{hierarchy}]"
+        else:
+            hierarchy_str = ""
+        
+        # Format chunk numbering
+        chunk_num_str = ""
+        if current_num is not None and total_num is not None:
+            chunk_num_str = f" [chunk {current_num}/{total_num}]"
+        
+        return f"{name} [book: {book}]{hierarchy_str}{chunk_num_str}"
+    
     def retrieve(self, query: str, k: int = 15, distance_threshold: float = 0.4, debug: bool = False, enable_filtering: bool = True, max_iterations: int = 3):
         """Retrieve top-k relevant chunks from ChromaDB with entity-aware enhancement and optional query_must filtering.
         
@@ -385,23 +416,35 @@ class DnDRAG:
             newly_kept = []
             newly_excluded = []
             
+            # Track total chunks to process for numbering
+            total_chunks_in_batch = len(results['ids'][0])
+            chunk_counter = 0
+            
             for chunk_id, metadata, document, distance in zip(
                 results['ids'][0],
                 results['metadatas'][0],
                 results['documents'][0],
                 results['distances'][0]
             ):
+                chunk_counter += 1
+                
                 # Extract uid from metadata (fallback to chunk_id if not present for backwards compatibility)
                 uid = metadata.get('uid', chunk_id)
                 
                 # Skip if already kept in a previous iteration (avoid duplicates)
                 if uid in kept_ids:
                     if debug:
-                        self.output.info(f"  ⏭️  SKIP: {metadata.get('title', metadata.get('name', uid))} (duplicate)")
+                        chunk_info = self._format_chunk_info(metadata, chunk_counter, total_chunks_in_batch)
+                        self.output.info(f"  ⏭️  SKIP: {chunk_info} (duplicate)")
                     continue
                 
-                # Check if chunk has query_must metadata
-                if 'query_must' in metadata:
+                # Skip query_must filtering for reference chunks (EXPLANATORY NOTES)
+                # These are educational/reference material that should always be available
+                is_reference = (metadata.get('type') == 'reference' and 
+                               metadata.get('section') == 'EXPLANATORY NOTES')
+                
+                # Check if chunk has query_must metadata (skip for reference chunks)
+                if 'query_must' in metadata and not is_reference:
                     try:
                         # Parse query_must (stored as JSON string in ChromaDB)
                         query_must = json.loads(metadata['query_must']) if isinstance(metadata['query_must'], str) else metadata['query_must']
@@ -416,16 +459,19 @@ class DnDRAG:
                             })
                             kept_ids.add(uid)  # Track by uid
                             if debug:
-                                self.output.info(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))}")
+                                chunk_info = self._format_chunk_info(metadata, chunk_counter, total_chunks_in_batch)
+                                self.output.info(f"  ✅ KEEP: {chunk_info}")
                         else:
                             newly_excluded.append(uid)  # Track by uid
                             excluded_ids.add(uid)  # Track by uid
                             if debug:
-                                self.output.info(f"  ❌ EXCLUDE: {metadata.get('title', metadata.get('name', uid))}")
+                                chunk_info = self._format_chunk_info(metadata, chunk_counter, total_chunks_in_batch)
+                                self.output.info(f"  ❌ EXCLUDE: {chunk_info}")
                     except json.JSONDecodeError as e:
                         # If query_must is malformed, keep the chunk (fail open)
                         if debug:
-                            self.output.info(f"  ⚠️  KEEP (malformed query_must): {metadata.get('title', metadata.get('name', uid))}")
+                            chunk_info = self._format_chunk_info(metadata, chunk_counter, total_chunks_in_batch)
+                            self.output.info(f"  ⚠️  KEEP (malformed query_must): {chunk_info}")
                         newly_kept.append({
                             'id': chunk_id,
                             'metadata': metadata,
@@ -443,7 +489,11 @@ class DnDRAG:
                     })
                     kept_ids.add(uid)  # Track by uid
                     if debug:
-                        self.output.info(f"  ✅ KEEP: {metadata.get('title', metadata.get('name', uid))} (no restrictions)")
+                        chunk_info = self._format_chunk_info(metadata, chunk_counter, total_chunks_in_batch)
+                        if is_reference:
+                            self.output.info(f"  ✅ KEEP: {chunk_info} (reference - no filtering)")
+                        else:
+                            self.output.info(f"  ✅ KEEP: {chunk_info} (no restrictions)")
             
             # Add kept chunks to results
             all_kept_chunks.extend(newly_kept)
@@ -667,13 +717,14 @@ Answer based on the context above:"""
                                enable_filtering=enable_filtering, max_iterations=max_iterations)
         
         # Show retrieved chunks
+        total_chunks = len(results['metadatas'][0])
         self.output.info(f"\nRetrieved chunks:")
         for i, (metadata, distance) in enumerate(zip(
             results['metadatas'][0],
             results['distances'][0]
-        )):
-            self.output.info(f"  {i+1}. {metadata.get('name', metadata.get('title', 'Unknown'))} "
-                  f"(type: {metadata.get('type', 'N/A')}, distance: {distance:.4f})")
+        ), 1):  # Start enumeration at 1
+            chunk_info = self._format_chunk_info(metadata, i, total_chunks)
+            self.output.info(f"  {i}. {chunk_info} (distance: {distance:.4f})")
         
         # Format context
         context = self.format_context(results)

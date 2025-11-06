@@ -76,6 +76,9 @@ class MonsterEncyclopediaChunker:
         Note: Headers can appear mid-line (e.g., "...text. ## ANHKHEG")
         so we need to split on the pattern within content, not just at line starts.
         
+        IMPORTANT: Only matches level 2 headers (##), not level 3 (###).
+        This ensures ### subsections within EXPLANATORY NOTES stay intact.
+        
         Returns list of raw chunks with:
             {
                 'title': 'DEMON',
@@ -86,12 +89,11 @@ class MonsterEncyclopediaChunker:
         """
         raw_chunks = []
         
-        # Pattern: ## followed by name starting with ALL CAPS word(s)
+        # Pattern: EXACTLY ## (not ###) followed by ALL CAPS name
+        # Negative lookbehind (?<![#]) ensures it's not ### or ####
         # Matches: "DEMON", "AERIAL SERVANT", "ANT, Giant", "APE (Gorilla)", etc.
-        # Logic: Require 2+ chars from [A-Z\s] (ALL CAPS base), then optional mixed-case suffix
-        # Does NOT match pure title case like "Succubus" (those are nested)
-        # Match anywhere in text, not just at line start
-        pattern = re.compile(r'## ([A-Z\s]{2,}[,\s\(\)A-Za-z0-9\-—\']*)(?=\n)')
+        # Does NOT match: "### FREQUENCY" (level 3), "Succubus" (title case)
+        pattern = re.compile(r'(?<![#])## ([A-Z\s]{2,}[,\s\(\)A-Za-z0-9\-—\']*)(?=\n)')
         
         # Pattern to detect separator lines like "NAME1 — NAME2 — NAME3"
         separator_pattern = re.compile(r'^[A-Z][A-Z\s,\']+(?: — [A-Z][A-Z\s,\']+)+$')
@@ -170,10 +172,10 @@ class MonsterEncyclopediaChunker:
     
     def classify_chunk(self, raw_chunk: Dict) -> str:
         """
-        Classify chunk as 'monster', 'category', or 'other'.
+        Classify chunk as 'monster', 'category', 'explanatory_notes', or 'other'.
         
         Rules:
-        1. Special case: EXPLANATORY NOTES → 'other'
+        1. Special case: EXPLANATORY NOTES → 'explanatory_notes'
         2. Has "FREQUENCY:" immediately after title → 'monster' (PRIORITY!)
         3. Has nested "## <Name>" + "FREQUENCY:" (at least 2) → 'category'
         4. Otherwise → 'other' (discard)
@@ -188,7 +190,7 @@ class MonsterEncyclopediaChunker:
         
         # Special case: Explanatory notes at the beginning
         if title == 'EXPLANATORY NOTES':
-            return 'other'
+            return 'explanatory_notes'
         
         # Check if this chunk itself has FREQUENCY: immediately after title
         # This takes priority - if it has FREQUENCY, it's a monster (not a category)
@@ -581,6 +583,83 @@ class MonsterEncyclopediaChunker:
         clean_name = re.sub(r'[^a-z0-9_]', '', clean_name)
         return f"{clean_name}_mon_{self.monster_counter:03d}"
     
+    def process_explanatory_notes(self, raw_chunk: Dict) -> List[Dict]:
+        """
+        Process EXPLANATORY NOTES section into individual subsection chunks.
+        
+        Structure:
+        - ## EXPLANATORY NOTES (main header)
+        - Introductory paragraph
+        - ### FREQUENCY (subsection)
+        - ### HIT DICE (subsection)
+        - etc.
+        
+        Each ### subsection becomes its own chunk for "further reading" references.
+        
+        Returns:
+            List of chunks, one per subsection
+        """
+        content = raw_chunk['content']
+        start_line = raw_chunk['start_line']
+        
+        chunks = []
+        
+        # Split on ### headers
+        # Pattern: ### followed by text until next ### or end
+        subsection_pattern = re.compile(r'###\s+([^\n]+)')
+        matches = list(subsection_pattern.finditer(content))
+        
+        if not matches:
+            # No subsections found, return empty list
+            return chunks
+        
+        for i, match in enumerate(matches):
+            subsection_name = match.group(1).strip()
+            subsection_start = match.start()
+            
+            # Find end: next subsection or end of content
+            if i + 1 < len(matches):
+                subsection_end = matches[i + 1].start()
+            else:
+                subsection_end = len(content)
+            
+            subsection_content = content[subsection_start:subsection_end].strip()
+            
+            # Calculate line numbers (approximate)
+            lines_before = content[:subsection_start].count('\n')
+            lines_in_section = subsection_content.count('\n') + 1
+            chunk_start_line = start_line + lines_before
+            chunk_end_line = chunk_start_line + lines_in_section
+            
+            # Generate unique ID
+            self.monster_counter += 1  # Reuse counter for explanatory notes
+            clean_name = subsection_name.lower().replace(' ', '_')
+            clean_name = re.sub(r'[^a-z0-9_]', '', clean_name)
+            uid = f"{clean_name}_ref_{self.monster_counter:03d}"
+            
+            # Build chunk
+            # Note: No query_must for reference chunks - they should appear
+            # for any query regardless of entity matching
+            chunk = {
+                'name': subsection_name,
+                'content': subsection_content,
+                'metadata': {
+                    'type': 'reference',
+                    'uid': uid,
+                    'book': self.book_name,
+                    'section': 'EXPLANATORY NOTES',
+                    'hierarchy': 'EXPLANATORY NOTES',  # Consistent hierarchy field
+                    'start_line': chunk_start_line,
+                    'end_line': chunk_end_line,
+                    'char_count': len(subsection_content),
+                    'line_count': lines_in_section
+                }
+            }
+            
+            chunks.append(chunk)
+        
+        return chunks
+    
     def build_monster_metadata(self, name: str, parent_category: Optional[str],
                                parent_category_id: Optional[str], start_line: int,
                                end_line: int, char_count: int, 
@@ -588,22 +667,30 @@ class MonsterEncyclopediaChunker:
         """Build metadata dict for monster chunk."""
         uid = self.generate_monster_id(name)  # Reuse existing ID generation
         
-        # Split name into words for contain_one_of matching
-        # This handles cases like "Gold Dragon (Draco Orientalus Sino Dux)" 
-        # where user might just search "gold dragon"
-        name_words = name.lower().split()
+        # Extract base name without parenthetical text for contain matching
+        # "Gold Dragon (Draco Orientalus Sino Dux)" → "gold dragon"
+        # This prevents false matches like "Blue Dragon" matching "Gold Dragon"
+        # because both contain "dragon"
+        base_name = re.sub(r'\s*\([^)]*\)\s*', '', name).strip().lower()
+        
+        # Build hierarchy string
+        if parent_category:
+            hierarchy = f"{parent_category} → {name}"
+        else:
+            hierarchy = name
         
         metadata = {
             'type': 'monster',
             'uid': uid,  # Use uid instead of monster_id for ChromaDB filtering
             'book': self.book_name,
+            'hierarchy': hierarchy,  # Consistent hierarchy field
             'start_line': start_line,
             'end_line': end_line,
             'char_count': char_count,
             'description_char_count': desc_char_count,
             'line_count': end_line - start_line,
             'query_must': {
-                'contain_one_of': [name_words]  # Query must contain at least one word from monster name
+                'contain': base_name  # Query must contain the monster's base name (without parenthetical)
             }
         }
         
@@ -622,6 +709,7 @@ class MonsterEncyclopediaChunker:
             'uid': category_id,  # Use uid instead of category_id for ChromaDB filtering
             'category_id': category_id,  # Keep for backwards compatibility
             'book': self.book_name,
+            'hierarchy': name,  # Consistent hierarchy field
             'start_line': start_line,
             'end_line': end_line,
             'char_count': char_count,
@@ -654,10 +742,12 @@ class MonsterEncyclopediaChunker:
         
         categories = [c for c in raw_chunks if c['chunk_type'] == 'category']
         monsters = [c for c in raw_chunks if c['chunk_type'] == 'monster']
+        explanatory = [c for c in raw_chunks if c['chunk_type'] == 'explanatory_notes']
         others = [c for c in raw_chunks if c['chunk_type'] == 'other']
         
         print(f"  Categories: {len(categories)}")
         print(f"  Standalone Monsters: {len(monsters)}")
+        print(f"  Explanatory Notes: {len(explanatory)}")
         print(f"  Other (discarded): {len(others)}")
         
         if others:
@@ -668,7 +758,13 @@ class MonsterEncyclopediaChunker:
                 print(f"    ... and {len(others) - 10} more")
         
         # Phase 3 & 4: Process
-        print("\nPhase 3-4: Processing categories and monsters...")
+        print("\nPhase 3-4: Processing chunks...")
+        
+        # Process explanatory notes first
+        for exp_chunk in explanatory:
+            exp_chunks = self.process_explanatory_notes(exp_chunk)
+            self.chunks.extend(exp_chunks)
+            print(f"  Explanatory Notes: {len(exp_chunks)} subsections")
         
         for cat_chunk in categories:
             cat, monsters_in_cat = self.process_category(cat_chunk)
@@ -685,6 +781,7 @@ class MonsterEncyclopediaChunker:
             self.chunks.append(monster)
         
         print(f"\n✅ Created {len(self.chunks)} total chunks")
+        print(f"   - {sum(1 for c in self.chunks if c.get('metadata', {}).get('type') == 'reference')} reference sections")
         print(f"   - {sum(1 for c in self.chunks if c.get('metadata', {}).get('type') == 'category')} categories")
         print(f"   - {sum(1 for c in self.chunks if c.get('metadata', {}).get('type') == 'monster')} monsters")
         
