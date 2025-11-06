@@ -14,21 +14,26 @@ from .base_embedder import Embedder
 
 class MonsterBookEmbedder(Embedder):
     """
-    Embedder for Monster Manual chunks (legacy format).
+    Embedder for Monster Manual chunks (current format).
+
+    Supports three chunk types:
+    1. Monster chunks (with statistics)
+    2. Category chunks (taxonomic groupings)
+    3. Reference chunks (EXPLANATORY NOTES sections)
 
     Chunk Format:
     {
-        "name": "DEMON",
-        "description": "...",
-        "statistics": {
+        "name": "DEMON" | "HIT DICE",
+        "content": "..." | "description": "...",  # Backwards compatible
+        "statistics": {  # Only for monsters
             "frequency": "...",
             "armor_class": "...",
             ...
         },
         "metadata": {
-            "type": "monster" | "category",
-            "monster_id": "...",
-            "category_id": "...",
+            "type": "monster" | "category" | "reference",
+            "uid": "demogorgon_mon_057" | "hit_dice_ref_005",
+            "section": "EXPLANATORY NOTES",  # Only for reference chunks
             ...
         }
     }
@@ -41,8 +46,9 @@ class MonsterBookEmbedder(Embedder):
 
         Monster Manual format signature:
         - Has 'name' field (not 'title')
-        - Has 'description' field (not 'content')
-        - Optional: Has 'statistics' field (strong indicator)
+        - Has 'content' OR 'description' field
+        - Has 'metadata' with 'type' field
+        - Type is one of: 'monster', 'category', 'reference'
 
         Args:
             chunks: List of chunk dictionaries
@@ -57,12 +63,17 @@ class MonsterBookEmbedder(Embedder):
 
         # Must have these fields
         has_name = "name" in sample
-        has_description = "description" in sample
+        has_text = "content" in sample or "description" in sample
+        has_metadata = "metadata" in sample
+        
+        if not (has_name and has_text and has_metadata):
+            return False
+        
+        # Check type field
+        chunk_type = sample.get("metadata", {}).get("type")
+        valid_type = chunk_type in ("monster", "category", "reference", "default")
 
-        # Must NOT have rulebook fields
-        has_rulebook_fields = "uid" in sample
-
-        return has_name and has_description and not has_rulebook_fields
+        return valid_type
 
     def embed_chunks(self) -> None:
         """
@@ -102,7 +113,8 @@ class MonsterBookEmbedder(Embedder):
             # Step 1: Add statistics blocks to text
             texts = []
             for chunk in batch:
-                text = chunk.get("description", "")
+                # Backwards compatible: support both 'content' and 'description'
+                text = chunk.get("content", chunk.get("description", ""))
                 text = self.add_statistic_block(chunk, text)
                 texts.append(text)
 
@@ -129,7 +141,7 @@ class MonsterBookEmbedder(Embedder):
         """
         Prepend statistics to monster descriptions.
 
-        Only prepends statistics for actual monsters (not categories).
+        Only prepends statistics for actual monsters (not categories or references).
         Makes statistics searchable by embedding them.
 
         Args:
@@ -137,9 +149,9 @@ class MonsterBookEmbedder(Embedder):
             text: Original description text
 
         Returns:
-            Text with statistics prepended (for monsters) or original text (for categories)
+            Text with statistics prepended (for monsters) or original text (for others)
         """
-        # Only prepend statistics for actual monsters (not categories)
+        # Only prepend statistics for actual monsters (not categories or references)
         if chunk["metadata"]["type"] == "monster" and "statistics" in chunk:
             stats = chunk["statistics"]
             stats_text = f"## {chunk.get('name', 'Unknown')}\n\n"
@@ -156,7 +168,8 @@ class MonsterBookEmbedder(Embedder):
         """
         Prepare text from Monster Manual chunk for embedding.
 
-        Calls add_statistic_block for monsters, returns description as-is for categories.
+        Calls add_statistic_block for monsters, returns text as-is for categories/references.
+        Backwards compatible with both 'content' and 'description' fields.
 
         Args:
             chunk: Monster chunk dictionary
@@ -164,14 +177,17 @@ class MonsterBookEmbedder(Embedder):
         Returns:
             Text ready for embedding
         """
-        text = chunk.get("description", "")
+        text = chunk.get("content", chunk.get("description", ""))
         return self.add_statistic_block(chunk, text)
 
     def extract_chunk_id(self, chunk: Dict[str, Any], index: int) -> str:
         """
         Extract unique ID from Monster Manual chunk.
 
-        Uses monster_id or category_id from metadata.
+        Priority order:
+        1. uid from metadata (new format)
+        2. monster_id or category_id (legacy format)
+        3. Fallback: chunk_{index}
 
         Args:
             chunk: Monster chunk dictionary
@@ -180,6 +196,11 @@ class MonsterBookEmbedder(Embedder):
         Returns:
             Unique string identifier
         """
+        # Try new format first (uid in metadata)
+        if "uid" in chunk.get("metadata", {}):
+            return chunk["metadata"]["uid"]
+        
+        # Fall back to legacy format
         return (
             chunk["metadata"].get("monster_id")
             or chunk["metadata"].get("category_id")
@@ -190,7 +211,7 @@ class MonsterBookEmbedder(Embedder):
         """
         Extract and transform metadata for Monster Manual chunks.
 
-        Handles both monster and category types, flattens statistics for filtering.
+        Handles monster, category, and reference types. Flattens statistics for filtering.
         Transforms "default" type to "monster" if present.
 
         Args:
@@ -212,12 +233,21 @@ class MonsterBookEmbedder(Embedder):
             "book": "Monster_Manual_(1e)",
         }
         
-        # Add uid (for ChromaDB filtering by metadata.uid)
+        # Add hierarchy (if present - normalized field across all chunk types)
+        if "hierarchy" in chunk["metadata"]:
+            metadata["hierarchy"] = chunk["metadata"]["hierarchy"]
+        
+        # Add uid (required for new format, optional for legacy)
         if "uid" in chunk["metadata"]:
             metadata["uid"] = chunk["metadata"]["uid"]
 
+        # Add reference-specific metadata
+        if chunk_type == "reference":
+            if "section" in chunk["metadata"]:
+                metadata["section"] = chunk["metadata"]["section"]
+
         # Add category-specific metadata
-        if chunk_type == "category":
+        elif chunk_type == "category":
             if "category_id" in chunk["metadata"]:
                 metadata["category_id"] = chunk["metadata"]["category_id"]
             if "line_count" in chunk["metadata"]:

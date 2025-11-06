@@ -56,7 +56,7 @@ class ConfigManager:
             env_file = search_path / ".env"
             if env_file.exists() and env_file.is_file():
                 print(f"Loading .env from: {env_file}")
-                load_dotenv(env_file)
+                load_dotenv(env_file, override=True)
                 self._env_path = env_file
                 self._env_loaded = True
                 return True
