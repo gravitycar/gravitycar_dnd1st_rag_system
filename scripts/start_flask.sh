@@ -1,10 +1,19 @@
 #!/usr/bin/bash
 
-# Load environment variables from .env file
-if [ -f .env ]; then
+# Load environment variables from .env.dndchat file
+# Try production path first (/home/gravityc/.env.dndchat), then local path (.env.dndchat)
+if [ -f ~/.env.dndchat ]; then
     set -a
-    source .env
+    source ~/.env.dndchat
     set +a
+    echo "Loaded environment from ~/.env.dndchat"
+elif [ -f .env.dndchat ]; then
+    set -a
+    source .env.dndchat
+    set +a
+    echo "Loaded environment from .env.dndchat"
+else
+    echo "Warning: No .env.dndchat file found in ~ or current directory"
 fi
 
 # Set defaults if not in .env

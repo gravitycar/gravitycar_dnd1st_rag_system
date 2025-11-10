@@ -1,0 +1,33 @@
+################################################################################
+# Apache Configuration for D&D RAG Flask API (PHP Proxy Mode)
+# 
+# This configuration uses a PHP script to proxy HTTPS requests from Apache
+# to the Flask application running on localhost:5000 (HTTP).
+#
+# Flow: Browser (HTTPS) → Apache (Let's Encrypt SSL) → PHP Proxy → Flask (HTTP)
+#
+# Deployment: Copy this to /home/gravityc/public_html/dndchat.gravitycar.com/.htaccess
+################################################################################
+
+# Enable RewriteEngine
+RewriteEngine On
+
+# Proxy all /api/* requests through PHP proxy script
+RewriteCond %{REQUEST_URI} ^/api/
+RewriteRule ^(.*)$ /api_proxy.php [L,QSA]
+
+# Proxy /health endpoint through PHP proxy script
+RewriteRule ^health$ /api_proxy.php [L,QSA]
+
+# Security headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# NOTE: CORS headers are handled by api_proxy.php, not Apache
+# This avoids header conflicts that cause 500 errors
+
+

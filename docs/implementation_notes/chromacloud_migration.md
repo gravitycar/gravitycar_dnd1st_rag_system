@@ -26,8 +26,8 @@
 ### Environment Variables
 ```bash
 # Required for ChromaCloud
-chroma_cloud_api_key=ck-5JXsZAhHhrwFLYfQBiEMs8zbJchKSWsvH7Wougmv3Kfq
-chroma_cloud_tenant_id=120ffaa8-32bf-4e7d-823d-c587bd8a5202
+chroma_cloud_api_key=YOUR_CHROMACLOUD_API_KEY
+chroma_cloud_tenant_id=YOUR_TENANT_ID
 chroma_cloud_database=adnd_1e
 
 # Auto-detection logic:
@@ -51,8 +51,8 @@ connector = ChromaDBConnector()  # → HttpClient(localhost:8060)
 **Cloud Mode** (production):
 ```bash
 # Uncomment cloud credentials in .env
-chroma_cloud_api_key=ck-5JXsZAhHhrwFLYfQBiEMs8zbJchKSWsvH7Wougmv3Kfq
-chroma_cloud_tenant_id=120ffaa8-32bf-4e7d-823d-c587bd8a5202
+chroma_cloud_api_key=YOUR_CHROMACLOUD_API_KEY
+chroma_cloud_tenant_id=YOUR_TENANT_ID
 chroma_cloud_database=adnd_1e
 
 # Connector uses ChromaCloud

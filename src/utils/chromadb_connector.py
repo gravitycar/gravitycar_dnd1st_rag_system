@@ -69,11 +69,20 @@ class ChromaDBConnector:
             self.cloud_database = cloud_database
             
             print(f"Connecting to ChromaCloud (tenant: {cloud_tenant}, database: {cloud_database})")
-            self.client = chromadb.CloudClient(
-                api_key=cloud_api_key,
-                tenant=cloud_tenant,
-                database=cloud_database
-            )
+            try:
+                self.client = chromadb.CloudClient(
+                    api_key=cloud_api_key,
+                    tenant=cloud_tenant,
+                    database=cloud_database
+                )
+                # Test connection by listing collections
+                _ = self.client.list_collections()
+                print("✅ Successfully connected to ChromaCloud")
+            except Exception as e:
+                raise ConnectionError(
+                    f"Failed to connect to ChromaCloud: {e}\n"
+                    f"Check your chroma_cloud_api_key and chroma_cloud_tenant_id in .env.dndchat"
+                ) from e
         else:
             # Local HTTP mode
             if chroma_host is None or chroma_port is None:
@@ -83,7 +92,16 @@ class ChromaDBConnector:
             self.chroma_port = chroma_port
             
             print(f"Connecting to local ChromaDB ({chroma_host}:{chroma_port})")
-            self.client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
+            try:
+                self.client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
+                # Test connection by listing collections
+                _ = self.client.list_collections()
+                print("✅ Successfully connected to local ChromaDB")
+            except Exception as e:
+                raise ConnectionError(
+                    f"Failed to connect to ChromaDB at {chroma_host}:{chroma_port}: {e}\n"
+                    f"Make sure ChromaDB is running (./scripts/start_chroma.sh)"
+                ) from e
     
     def get_collection(self, name: str):
         """

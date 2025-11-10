@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gravitycar-dnd1st-rag-system"
+version = "1.0.0"
+description = "RAG system for Advanced Dungeons & Dragons 1st Edition rulebooks (Production - Query Only)"
+readme = "README.md"
+authors = [
+    {name = "GravityCar", email = "contact@gravitycar.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "chromadb>=1.1.1",
+    "openai>=1.0.0",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/gravitycar/gravitycar_dnd1st_rag_system"
+Repository = "https://github.com/gravitycar/gravitycar_dnd1st_rag_system"
+Documentation = "https://github.com/gravitycar/gravitycar_dnd1st_rag_system/docs"
+
+[tool.setuptools]
+packages = ["gravitycar_dnd1st_rag_system"]
+
+[tool.setuptools.package-dir]
+gravitycar_dnd1st_rag_system = "src"
