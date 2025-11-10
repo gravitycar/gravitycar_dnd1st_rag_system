@@ -1,8 +1,8 @@
 # D&D RAG API Integration Guide for React UI
 
-**Date**: November 4, 2025  
+**Date**: November 9, 2025  
 **API Version**: 1.0.0  
-**Status**: Ready for local development
+**Status**: Production Ready (PHP Proxy with Let's Encrypt SSL)
 
 ---
 
@@ -18,7 +18,7 @@ const API_CONFIG = {
     corsOrigin: 'http://localhost:3000'
   },
   production: {
-    baseUrl: 'https://dndchat.gravitycar.com',
+    baseUrl: 'https://dndchat.gravitycar.com',  // No port! Apache proxy handles routing
     authUrl: 'https://api.gravitycar.com',
     corsOrigin: 'https://react.gravitycar.com'
   }
@@ -36,8 +36,8 @@ if (window.location.hostname === 'localhost') {
   // Use local Flask (port 5000)
   apiUrl = 'http://localhost:5000';
 } else if (window.location.hostname === 'react.gravitycar.com') {
-  // Use production Flask
-  apiUrl = 'https://dndchat.gravitycar.com';
+  // Use production with PHP proxy (no port)
+  apiUrl = 'https://dndchat.gravitycar.com';  // Port 443 (standard HTTPS)
 }
 ```
 
@@ -46,8 +46,29 @@ if (window.location.hostname === 'localhost') {
 ## 2. API Endpoints
 
 ### Base URLs
-- **Local**: `http://localhost:5000`
-- **Production**: `https://dndchat.gravitycar.com` (when deployed)
+- **Local**: `http://localhost:5000` (direct Flask connection)
+- **Production**: `https://dndchat.gravitycar.com` (via Apache + PHP proxy)
+
+### Architecture Notes
+
+#### Production Setup (PHP Proxy)
+The production deployment uses a **PHP reverse proxy** as a workaround for Hurricane Electric hosting limitations:
+
+```
+Browser (HTTPS) → Apache (Let's Encrypt SSL) → PHP Proxy → Flask (HTTP localhost:5000)
+```
+
+**Why this matters for your UI:**
+- ✅ **No port in URL**: Use `https://dndchat.gravitycar.com/api/query` (NOT `:5000`)
+- ✅ **Trusted SSL**: Browser shows green padlock (Let's Encrypt certificate)
+- ✅ **Standard HTTPS**: No certificate warnings for users
+- ⚠️ **Slight latency**: PHP adds ~5-10ms overhead (negligible)
+
+**What's transparent to you:**
+- Request/response format unchanged
+- Headers identical
+- CORS handling works the same
+- Error codes unchanged
 
 ### Available Endpoints
 
@@ -70,7 +91,11 @@ POST /api/query
 // GET /health
 // No headers required, no body
 
-const response = await fetch('http://localhost:5000/health');
+// Environment-aware URL construction
+const isDevelopment = window.location.hostname === 'localhost';
+const baseUrl = isDevelopment ? 'http://localhost:5000' : 'https://dndchat.gravitycar.com';
+
+const response = await fetch(`${baseUrl}/health`);
 const data = await response.json();
 
 // Response: { status: 'ok', service: 'dnd_rag', version: '1.0.0' }
@@ -80,11 +105,15 @@ const data = await response.json();
 ```typescript
 // POST /api/query
 
+// Environment-aware URL construction
+const isDevelopment = window.location.hostname === 'localhost';
+const baseUrl = isDevelopment ? 'http://localhost:5000' : 'https://dndchat.gravitycar.com';
+
 // Headers (REQUIRED)
 const headers = {
   'Content-Type': 'application/json',
   'Authorization': `Bearer ${jwtToken}`,  // From localStorage.getItem('auth_token')
-  'Origin': 'http://localhost:3000'       // Auto-sent by browser
+  // Origin is auto-sent by browser - DO NOT set manually
 };
 
 // Body (JSON)
@@ -95,7 +124,7 @@ const body = {
 };
 
 // Full request
-const response = await fetch('http://localhost:5000/api/query', {
+const response = await fetch(`${baseUrl}/api/query`, {
   method: 'POST',
   headers: headers,
   body: JSON.stringify(body),
@@ -546,17 +575,33 @@ async function queryWithRetry(
 
 ### Test Cases
 
-#### 1. Health Check
+#### 1. Health Check (Local)
 ```bash
 curl http://localhost:5000/health
 ```
 **Expected**: `{ "status": "ok", "service": "dnd_rag", "version": "1.0.0" }`
 
-#### 2. Valid Query
+#### 1b. Health Check (Production)
+```bash
+curl https://dndchat.gravitycar.com/health
+```
+**Expected**: `{ "status": "ok", "service": "dnd_rag", "version": "1.0.0" }`
+
+#### 2. Valid Query (Local)
 ```bash
 ./scripts/test_flask_query.sh "Bearer YOUR_TOKEN" "What is a beholder?"
 ```
 **Expected**: HTTP 200 with answer
+
+#### 2b. Valid Query (Production)
+```bash
+curl -X POST https://dndchat.gravitycar.com/api/query \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Origin: https://react.gravitycar.com" \
+  -d '{"question": "What is a beholder?"}'
+```
+**Expected**: HTTP 200 with answer (single CORS header in response)
 
 #### 3. Missing Token
 ```bash
@@ -590,8 +635,17 @@ curl -X POST http://localhost:5000/api/query \
 
 ### CORS Configuration
 - **Local**: Flask allows `http://localhost:3000` and `http://localhost:3001`
-- **Production**: Flask will allow `https://react.gravitycar.com`
-- Browser automatically sends `Origin` header - don't override it
+- **Production**: Apache + PHP proxy allow `https://react.gravitycar.com` and `https://gravitycar.com`
+- Browser automatically sends `Origin` header - **DO NOT set it manually**
+- Production uses PHP proxy to handle CORS (Flask's CORS headers are stripped)
+
+### Production Proxy Details
+- **Architecture**: Apache (Let's Encrypt SSL) → PHP reverse proxy → Flask (localhost HTTP)
+- **SSL Certificate**: Trusted Let's Encrypt certificate (no browser warnings)
+- **Latency**: Adds ~5-10ms overhead compared to direct Flask connection
+- **CORS Handling**: PHP proxy strips Flask's CORS headers and sets its own to prevent duplicates
+- **URL Pattern**: Use standard HTTPS port 443 (no `:5000` in production URLs)
+- **Security**: Flask bound to 127.0.0.1 (localhost only), not accessible from internet
 
 ### Token Expiration
 - JWT tokens expire after 1 hour (check `exp` claim)
@@ -619,6 +673,7 @@ curl -X POST http://localhost:5000/api/query \
 
 ## 9. Quick Start Checklist
 
+### Local Development
 For UI development, you need:
 
 - [ ] Flask running locally: `./scripts/start_flask.sh`
@@ -631,14 +686,38 @@ For UI development, you need:
 - [ ] Display for rate limit and cost information
 - [ ] User-friendly error messages
 
+### Production Setup
+For production deployment:
+
+- [ ] Apache with Let's Encrypt SSL certificate (handled by hosting)
+- [ ] PHP proxy script deployed (`api_proxy.php`)
+- [ ] `.htaccess` routing configured
+- [ ] Flask running on `127.0.0.1:5000` (localhost only)
+- [ ] Environment detection: `https://dndchat.gravitycar.com` (no port)
+- [ ] CORS origins: `https://react.gravitycar.com`, `https://gravitycar.com`
+- [ ] Test health check: `curl https://dndchat.gravitycar.com/health`
+- [ ] Test CORS: Verify single `Access-Control-Allow-Origin` header in responses
+
 ---
 
 ## 10. Example Test Flow
 
 ```typescript
+// Environment-aware base URL
+const isDevelopment = window.location.hostname === 'localhost';
+const baseUrl = isDevelopment 
+  ? 'http://localhost:5000' 
+  : 'https://dndchat.gravitycar.com';  // No port!
+
+const client = new DnDRagClient(
+  baseUrl,
+  () => localStorage.getItem('auth_token')
+);
+
 // 1. Check if API is available
 const health = await client.health();
 console.log('API Status:', health.status); // "ok"
+console.log('Environment:', isDevelopment ? 'local' : 'production');
 
 // 2. Submit a query
 const response = await client.query({
@@ -659,7 +738,50 @@ console.log('Query cost:', response.meta.cost.query_cost);
 
 ---
 
-## 11. HTTP Status Codes Summary
+## 11. Production Deployment Notes
+
+### PHP Proxy Architecture
+Due to Hurricane Electric hosting limitations (no `mod_proxy_http`, no direct SSL private key access), the production deployment uses a PHP reverse proxy:
+
+```
+┌─────────────┐     HTTPS (443)     ┌────────────────┐
+│   Browser   │ ──────────────────► │ Apache 2.4.52  │
+│ (React UI)  │                     │ Let's Encrypt  │
+└─────────────┘                     └────────┬───────┘
+                                             │
+                                             │ HTTP (localhost)
+                                             ▼
+                                    ┌────────────────┐
+                                    │ api_proxy.php  │
+                                    │ (CORS handler) │
+                                    └────────┬───────┘
+                                             │
+                                             │ HTTP (127.0.0.1:5000)
+                                             ▼
+                                    ┌────────────────┐
+                                    │ Flask + Gunicorn│
+                                    │ (4 workers)    │
+                                    └────────────────┘
+```
+
+**Key Points:**
+- ✅ Trusted SSL certificate (Let's Encrypt) - no browser warnings
+- ✅ Flask bound to localhost only (not internet-accessible)
+- ✅ CORS headers handled by PHP (Flask's headers stripped)
+- ✅ Standard HTTPS port 443 (no custom ports in URLs)
+- ⚠️ Minimal latency overhead (~5-10ms from PHP proxy)
+
+### URL Structure Comparison
+| Environment | Health Check | Query Endpoint |
+|-------------|--------------|----------------|
+| **Local** | `http://localhost:5000/health` | `http://localhost:5000/api/query` |
+| **Production** | `https://dndchat.gravitycar.com/health` | `https://dndchat.gravitycar.com/api/query` |
+
+**Critical:** Production URLs have **NO PORT** (standard HTTPS port 443)
+
+---
+
+## 12. HTTP Status Codes Summary
 
 | Status | Meaning | Response Fields | User Action |
 |--------|---------|----------------|-------------|
@@ -672,4 +794,35 @@ console.log('Query cost:', response.meta.cost.query_cost);
 
 ---
 
-**Ready for UI Development!** All Flask endpoints are working and tested. Start with the health check, then implement the query interface.
+## 13. Troubleshooting
+
+### Common Issues
+
+#### 1. CORS Errors in Production
+**Symptom**: "Access to fetch at 'https://dndchat.gravitycar.com' has been blocked by CORS policy"
+
+**Solution**: Verify your React app is served from `https://react.gravitycar.com` or `https://gravitycar.com` (allowed origins)
+
+#### 2. Mixed Content Warnings
+**Symptom**: "Mixed Content: The page at 'https://react.gravitycar.com' was loaded over HTTPS, but requested an insecure resource"
+
+**Solution**: Ensure production API URL uses `https://` (not `http://`)
+
+#### 3. 404 Not Found in Production
+**Symptom**: Health check works but `/api/query` returns 404
+
+**Solution**: Verify `.htaccess` rewrite rules are active on server
+
+#### 4. Duplicate CORS Headers
+**Symptom**: Browser shows "Access-Control-Allow-Origin header contains multiple values"
+
+**Solution**: This was fixed in the PHP proxy. If you see this, redeploy `api_proxy.php`
+
+#### 5. SSL Certificate Warnings
+**Symptom**: Browser shows "Not Secure" or certificate error
+
+**Solution**: Production uses Let's Encrypt (trusted). This should not happen. Contact hosting support.
+
+---
+
+**Ready for UI Development!** The production API is live at `https://dndchat.gravitycar.com` with trusted SSL and proper CORS handling.

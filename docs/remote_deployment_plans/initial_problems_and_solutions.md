@@ -1,8 +1,48 @@
-# Remote Deployment: Problems and Solutions
+# Remote Deployment: Historical Problems and Solutions
 
-**Target Architecture**: Deploy ChromaDB + D&D RAG system to public server (chroma.gravitycar.com)
+**ARCHIVED DOCUMENT - For Historical Reference Only**
 
-**Goal**: Create a web interface on react.gravitycar.com that queries the remote D&D RAG system.
+**Date**: November 2025 (Initial Planning)  
+**Status**: ❌ This document describes an OUTDATED architecture that was NOT implemented  
+**Current Solution**: See `docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md`
+
+---
+
+## What Actually Got Implemented
+
+The production deployment uses a **completely different architecture** than described in this document:
+
+**Actual Implementation (November 2025):**
+- ✅ Apache with Let's Encrypt SSL (trusted certificate)
+- ✅ PHP reverse proxy (`api_proxy.php`)
+- ✅ Flask on localhost:5000 (HTTP only, not internet-accessible)
+- ✅ ChromaCloud (cloud-hosted, not embedded)
+- ✅ URL: `https://dndchat.gravitycar.com` (not rag.gravitycar.com)
+
+**Documentation**: `docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md`
+
+**Key Differences from This Document:**
+1. ❌ This doc recommends Apache + mod_wsgi → HE confirmed mod_wsgi NOT available
+2. ❌ This doc recommends embedded ChromaDB → Actually uses ChromaCloud
+3. ❌ This doc shows rag.gravitycar.com → Actually deployed to dndchat.gravitycar.com
+4. ❌ This doc assumes port 80/443 for ChromaDB → ChromaDB is cloud-hosted, not on HE
+
+**Why Keep This Document?**
+- Historical context for architectural decisions
+- Shows problems encountered during initial planning
+- Demonstrates iterative problem-solving process
+
+**For current deployment instructions, see:**
+- `docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md` - Complete deployment guide
+- `docs/deployment/PHP_PROXY_SETUP.md` - PHP proxy implementation details
+
+---
+
+## Historical Context (November 2025)
+
+**Original Target Architecture**: Deploy ChromaDB + D&D RAG system to public server (chroma.gravitycar.com)
+
+**Original Goal**: Create a web interface on react.gravitycar.com that queries the remote D&D RAG system.
 
 ---
 
@@ -343,22 +383,47 @@ LoadModule wsgi_module modules/mod_wsgi.so
 
 ---
 
-## Solution Tracking
+## Solution Tracking (Historical)
 
-### ✅ **SOLVED**
-- **Port Binding & ChromaDB Configuration**: Centralized config utility with flexible .env discovery
-- **ChromaDB Deployment Strategy**: Apache + WSGI + Embedded ChromaDB architecture chosen
-- **Resource Constraints & Memory Requirements**: Migration to OpenAI embeddings API eliminates 420MB requirement
+**❌ OUTDATED - These solutions were NOT implemented as described**
 
-### 🔄 **IN PROGRESS** 
-- **Security & API Key Management**: Production .env created, need secure deployment plan
-- **Data Export/Import Strategy**: Migration strategy updated for OpenAI embeddings
-- **Web API Wrapper Design**: Architecture decided, implementation pending
+The actual implementation differs significantly. See `docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md` for current architecture.
 
-### 🔍 **NEEDS DECISION/RESEARCH**
-- Development & Deployment Workflow
+### ✅ **ACTUALLY SOLVED (Different Approach)**
+- **Port Binding**: Uses Apache port 443 (HTTPS) with PHP proxy to Flask localhost:5000
+- **ChromaDB Deployment**: Uses ChromaCloud (cloud-hosted), not embedded
+- **Resource Constraints**: ChromaCloud hosting eliminates memory concerns
+- **SSL/Security**: Let's Encrypt SSL via Apache (trusted certificate)
+
+### ❌ **NOT IMPLEMENTED AS DESCRIBED**
+- Apache + mod_wsgi: HE confirmed mod_wsgi not available
+- Embedded ChromaDB: Using ChromaCloud instead
+- Port 80 deployment: Using port 443 (HTTPS) with Let's Encrypt
 
 ---
 
-*Last Updated: October 15, 2025*  
-*Next Review: After initial hosting assessment*
+## Actual Production Architecture (November 2025)
+
+```
+Browser (HTTPS) → Apache (Let's Encrypt SSL, port 443) 
+                → PHP Proxy (api_proxy.php)
+                → Flask (HTTP, localhost:5000) 
+                → ChromaCloud (cloud-hosted)
+                → OpenAI API (embeddings + GPT-4o-mini)
+```
+
+**Key Files:**
+- `docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md` - Complete deployment guide
+- `docs/deployment/PHP_PROXY_SETUP.md` - PHP proxy implementation
+- `scripts/deploy_to_production.sh` - Automated deployment script
+- `api_proxy.php` - PHP reverse proxy (CORS handling)
+- `.htaccess.production` - Apache routing rules
+
+**Deployment URL:** `https://dndchat.gravitycar.com` (not rag.gravitycar.com)
+
+---
+
+*Document Created: October 15, 2025*  
+*Archived: November 10, 2025*  
+*Reason: Architecture changed to PHP proxy + ChromaCloud*  
+*Current Documentation: docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md*

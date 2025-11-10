@@ -50,11 +50,15 @@ logger.info("=" * 80)
 cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000')
 cors_origins_list = [origin.strip() for origin in cors_origins.split(',')]
 
+logger.info(f"Configuring CORS for origins: {cors_origins_list}")
+
 CORS(app, 
-     origins=cors_origins_list,
+     resources={r"/*": {"origins": cors_origins_list}},
      methods=['GET', 'POST', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization'],
-     supports_credentials=True)
+     expose_headers=['Content-Type'],
+     supports_credentials=True,
+     max_age=3600)
 
 # Initialize global components
 token_validator = TokenValidator(
@@ -147,7 +151,7 @@ def health():
     return jsonify(response), 200
 
 
-@app.route('/api/query', methods=['POST'])
+@app.route('/api/query', methods=['POST', 'OPTIONS'])
 def query():
     """
     Query the D&D RAG system.
@@ -165,6 +169,16 @@ def query():
         HTTP 503: Budget exceeded
         HTTP 500: Internal error
     """
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response, 200
+    
     request_start = datetime.utcnow()
     logger.info(f"Query request received from {request.remote_addr}")
     

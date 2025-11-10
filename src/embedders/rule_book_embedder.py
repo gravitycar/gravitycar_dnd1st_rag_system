@@ -19,6 +19,7 @@ from typing import Dict, List, Any
 from .base_embedder import Embedder
 import time
 import json
+import hashlib
 
 
 class RuleBookEmbedder(Embedder):
@@ -60,11 +61,16 @@ class RuleBookEmbedder(Embedder):
         """
         Embed rulebook chunks into ChromaDB.
 
-        Pipeline:
-        1. Prepare text for embedding (use content as-is, no statistics prepending)
-        2. Get embeddings from OpenAI (batched)
-        3. Process metadata (flatten hierarchy, transform type)
-        4. Add to ChromaDB collection
+        Pipeline (batched for ChromaCloud quota compliance):
+        1. Process chunks in batches of 32
+        2. For each batch:
+           - Prepare texts for embedding
+           - Get embeddings from OpenAI
+           - Process metadata
+           - Write immediately to ChromaDB (≤32 records per write)
+
+        This batched write approach ensures compliance with ChromaCloud's
+        "Maximum number of records per write" limit (300 records/write).
 
         Raises:
             ValueError: If _cached_chunks is None
@@ -76,40 +82,40 @@ class RuleBookEmbedder(Embedder):
             )
 
         chunks = self._cached_chunks
-        print(f"\n🔧 Processing {len(chunks)} rulebook chunks...")
-
-        # Step 1: Prepare texts for embedding
-        print("📝 Preparing texts for embedding...")
-        texts = [self.prepare_text_for_embedding(chunk) for chunk in chunks]
-
-        # Step 2: Get embeddings from OpenAI (batched)
-        print("🤖 Getting embeddings from OpenAI...")
         batch_size = 32
-        all_embeddings = []
+        total_chunks = len(chunks)
+        print(f"\n🔧 Processing {total_chunks} rulebook chunks...")
 
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i : i + batch_size]
-            batch_embeddings = self.get_embeddings_batch(batch_texts)
-            all_embeddings.extend(batch_embeddings)
+        for i in range(0, total_chunks, batch_size):
+            batch = chunks[i : i + batch_size]
+            batch_end = min(i + batch_size, total_chunks)
 
             print(
-                f"  Embedded batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1}"
+                f"Processing batch {i // batch_size + 1}/"
+                f"{(total_chunks + batch_size - 1) // batch_size} "
+                f"(chunks {i+1}-{batch_end})..."
             )
+
+            # Step 1: Prepare texts for this batch
+            texts = [self.prepare_text_for_embedding(chunk) for chunk in batch]
+
+            # Step 2: Get embeddings from OpenAI for this batch
+            embeddings = self.get_embeddings_batch(texts)
+
+            # Step 3: Process metadata for this batch
+            metadatas = [self.process_metadata(chunk) for chunk in batch]
+
+            # Step 4: Extract IDs for this batch
+            ids = [self.extract_chunk_id(chunk, i + j) for j, chunk in enumerate(batch)]
+
+            # Step 5: Write this batch to ChromaDB immediately
+            self.collection.add(
+                ids=ids, embeddings=embeddings, metadatas=metadatas, documents=texts
+            )
+
             time.sleep(0.1)  # Rate limiting
 
-        # Step 3: Process metadata
-        print("🏷️  Processing metadata...")
-        all_metadata = [self.process_metadata(chunk) for chunk in chunks]
-
-        # Step 4: Add to ChromaDB
-        print("💾 Adding to ChromaDB collection...")
-        ids = [self.extract_chunk_id(chunk, i) for i, chunk in enumerate(chunks)]
-
-        self.collection.add(
-            embeddings=all_embeddings, documents=texts, metadatas=all_metadata, ids=ids
-        )
-
-        print(f"✅ Successfully embedded {len(chunks)} rulebook chunks!")
+        print(f"✅ Successfully embedded {total_chunks} rulebook chunks!")
 
     def prepare_text_for_embedding(self, chunk: Dict[str, Any]) -> str:
         """
@@ -128,23 +134,37 @@ class RuleBookEmbedder(Embedder):
 
     def extract_chunk_id(self, chunk: Dict[str, Any], index: int) -> str:
         """
-        Extract unique identifier for rulebook chunk.
+        Extract or generate unique ID from chunk.
 
-        Uses top-level 'uid' field from recursive_chunker.
+        ChromaCloud free tier has a 128-byte limit on ID size.
+        For UIDs longer than 120 bytes, we use a shortened version:
+        - Keep first 80 characters of UID for readability
+        - Append 8-character hash of full UID for uniqueness
 
         Args:
             chunk: Chunk dictionary with 'uid' field
             index: Chunk position in array (fallback only)
 
         Returns:
-            Unique string identifier for this chunk
+            Unique string identifier for this chunk (≤128 bytes)
         """
         uid = chunk.get("uid")
-        if uid:
+        if not uid:
+            # Fallback (should never happen with recursive_chunker)
+            return f"chunk_{index}"
+        
+        # ChromaCloud free tier limit: 128 bytes for ID
+        # Use 120 as safety threshold (some overhead for encoding)
+        MAX_ID_LENGTH = 120
+        
+        if len(uid) <= MAX_ID_LENGTH:
             return uid
-
-        # Fallback (should never happen with recursive_chunker)
-        return f"chunk_{index}"
+        
+        # For long UIDs: truncate + hash for uniqueness
+        # Format: first_80_chars + "_" + 8_char_hash
+        hash_suffix = hashlib.md5(uid.encode()).hexdigest()[:8]
+        truncated = uid[:80]
+        return f"{truncated}_{hash_suffix}"
 
     def process_metadata(self, chunk: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -198,14 +218,13 @@ class RuleBookEmbedder(Embedder):
             processed["special_handler"] = metadata["special_handler"]
 
         # Split chunk metadata (if present)
+        # NOTE: We store original_chunk_uid, chunk_part, and total_parts, but NOT sibling_chunks
+        # because sibling_chunks can exceed ChromaCloud's 4KB metadata value limit (20+ UIDs × 150 bytes each).
+        # Sibling chunks can be reconstructed from original_chunk_uid + total_parts if needed.
         if "original_chunk_uid" in metadata:
             processed["original_chunk_uid"] = metadata["original_chunk_uid"]
             processed["chunk_part"] = metadata.get("chunk_part", 1)
             processed["total_parts"] = metadata.get("total_parts", 1)
-            # Store sibling_chunks as comma-separated string (ChromaDB doesn't support arrays)
-            siblings = metadata.get("sibling_chunks", [])
-            if siblings:
-                processed["sibling_chunks"] = ",".join(siblings)
 
         # Line numbers (if present)
         if "start_line" in metadata:

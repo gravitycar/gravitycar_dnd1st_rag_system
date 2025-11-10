@@ -1,0 +1,26 @@
+# GravityCar D&D 1st Edition RAG System - PRODUCTION Dependencies
+# Python 3.10+
+# 
+# This is a MINIMAL dependency set for production query-only servers.
+# Excludes heavy dependencies used only for development/embedding:
+#   - sentence-transformers (420MB PyTorch models) - replaced with OpenAI embeddings API
+#   - docling (~500MB) - only needed for PDF conversion (done offline)
+#   - PyMuPDF - only needed for PDF processing (done offline)
+
+# Vector Database (ChromaCloud client)
+chromadb==1.1.1
+
+# AI/ML Services (API clients only, no local models)
+openai==2.3.0
+
+# Web Framework
+flask==3.0.0
+flask-cors==4.0.0
+
+# Production WSGI Server (supports HTTPS)
+gunicorn==21.2.0
+
+# Configuration Management
+python-dotenv==1.1.1
+
+# TOTAL SIZE: ~150-200 MB (vs 2+ GB with sentence-transformers)

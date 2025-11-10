@@ -43,7 +43,15 @@ class DnDRAG:
         self.output.info(f"  Model: {model}")
         
         # Initialize OpenAI client
-        self.openai_client = OpenAI(api_key=api_key)
+        try:
+            self.openai_client = OpenAI(api_key=api_key)
+            self.output.info(f"  ✅ OpenAI client initialized")
+        except Exception as e:
+            self.output.error(f"  ❌ Failed to initialize OpenAI client: {e}")
+            raise ConnectionError(
+                f"Failed to initialize OpenAI client: {e}\n"
+                f"Check your gravitycar_openai_api_key in .env.dndchat"
+            ) from e
         
         # Set OpenAI embedding model (must match the model used for embedding)
         self.embedding_model_name = "text-embedding-3-small"

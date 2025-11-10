@@ -6,3 +6,5 @@ __pycache__/
 tmp/
 *.log
 
+.env.dndchat
+.env.dndchat.production

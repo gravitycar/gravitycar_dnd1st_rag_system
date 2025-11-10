@@ -55,8 +55,22 @@ fi
 
 # Create virtual environment
 echo "📦 Creating virtual environment..."
-python3 -m venv venv
-echo "✅ Virtual environment created"
+if python3 -m venv venv 2>/dev/null; then
+    echo "✅ Virtual environment created with pip"
+else
+    echo "⚠️  Standard venv creation failed, trying --without-pip..."
+    python3 -m venv --without-pip venv
+    echo "✅ Virtual environment created without pip"
+    
+    # Download and install pip manually
+    echo "📥 Downloading get-pip.py..."
+    curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+    
+    echo "📦 Installing pip locally..."
+    venv/bin/python3 get-pip.py
+    rm get-pip.py
+    echo "✅ pip installed"
+fi
 echo
 
 # Activate virtual environment

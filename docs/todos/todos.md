@@ -32,3 +32,4 @@
 [] Need to know - can I update the metadata for just one chunk? Can I retrieve just one chunk by chunk ID or similar
 [] Maybe reduce the minimum number of chunks to zero instead of two. ?
 [] Change the prompt instructions around reading tables.
+[] Remove sibling chunks metadata from rulebook chunker.
