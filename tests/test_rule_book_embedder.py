@@ -185,10 +185,9 @@ class TestRuleBookEmbedder:
                 assert result["original_chunk_uid"] == "DMG_PREFACE_1"
                 assert result["chunk_part"] == 1
                 assert result["total_parts"] == 3
-                assert (
-                    result["sibling_chunks"]
-                    == "DMG_PREFACE_1_part2,DMG_PREFACE_1_part3"
-                )
+                # Note: sibling_chunks is NOT stored in metadata to avoid exceeding
+                # ChromaCloud's 4KB metadata value limit. Siblings can be reconstructed
+                # from original_chunk_uid + total_parts if needed.
 
     def test_hierarchy_flattening(self):
         """Test hierarchy flattening with multiple levels."""
