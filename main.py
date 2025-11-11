@@ -153,7 +153,8 @@ def cmd_truncate(args):
     chroma = ChromaDBConnector()
     
     try:
-        count_deleted = chroma.truncate_collection(args.collection_name)
+        batch_size = getattr(args, 'batch_size', 500)
+        count_deleted = chroma.truncate_collection(args.collection_name, batch_size=batch_size)
         print(f"✅ Truncated collection '{args.collection_name}' ({count_deleted} entries deleted)")
     except Exception as e:
         print(f"Error: Could not truncate collection '{args.collection_name}'")
@@ -405,6 +406,8 @@ Examples:
     truncate_parser.add_argument('collection_name', help='ChromaDB collection name')
     truncate_parser.add_argument('--confirm', action='store_true', 
                                 help='Confirm truncation without prompting')
+    truncate_parser.add_argument('--batch-size', type=int, default=500,
+                                help='Batch size for deletion (default: 500, smaller for ChromaCloud)')
     
     # Transform tables command
     transform_parser = subparsers.add_parser('transform-tables', help='Transform complex markdown tables to JSON')

@@ -3,7 +3,7 @@
 # ChromaCloud Embedding Script
 # Embeds all 3 D&D books to ChromaCloud from local machine
 #
-# PREREQUISITE: Uncomment ChromaCloud credentials in .env:
+# PREREQUISITE: Ensure ChromaCloud credentials are set in .env.dndchat:
 #   chroma_cloud_api_key=YOUR_CHROMACLOUD_API_KEY
 #   chroma_cloud_tenant_id=YOUR_TENANT_ID
 #   chroma_cloud_database=adnd_1e
@@ -58,6 +58,29 @@ check_prerequisites() {
     fi
     log_success "Virtual environment active: $VIRTUAL_ENV"
     
+    # Source environment variables from .env.dndchat
+    if [ ! -f ".env.dndchat" ]; then
+        log_error ".env.dndchat file not found!"
+        exit 1
+    fi
+    
+    log_info "Loading environment from .env.dndchat..."
+    set -a  # Export all variables
+    source .env.dndchat
+    set +a  # Stop exporting
+    
+    # Check if ChromaCloud credentials are set
+    if [ -z "$chroma_cloud_api_key" ] || [ -z "$chroma_cloud_tenant_id" ]; then
+        log_error "ChromaCloud credentials not found in .env.dndchat!"
+        echo
+        log_info "Required environment variables:"
+        echo "  chroma_cloud_api_key=YOUR_CHROMACLOUD_API_KEY"
+        echo "  chroma_cloud_tenant_id=YOUR_TENANT_ID"
+        echo "  chroma_cloud_database=adnd_1e"
+        exit 1
+    fi
+    log_success "ChromaCloud credentials loaded from .env.dndchat"
+    
     # Check if chunk files exist
     if [ ! -f "data/chunks/chunks_Monster_Manual_(1e).json" ]; then
         log_error "Monster Manual chunks not found!"
@@ -72,18 +95,6 @@ check_prerequisites() {
         exit 1
     fi
     log_success "All chunk files found"
-    
-    # Check if ChromaCloud credentials are uncommented in .env
-    if ! grep -q "^chroma_cloud_api_key=" .env; then
-        log_error "ChromaCloud credentials not enabled in .env!"
-        echo
-        log_info "Please uncomment these lines in .env:"
-        echo "  chroma_cloud_api_key=YOUR_CHROMACLOUD_API_KEY"
-        echo "  chroma_cloud_tenant_id=YOUR_TENANT_ID"
-        echo "  chroma_cloud_database=adnd_1e"
-        exit 1
-    fi
-    log_success "ChromaCloud credentials enabled"
 }
 
 verify_chromacloud_connection() {
@@ -107,14 +118,12 @@ except Exception as e:
 
 embed_book() {
     local chunk_file=$1
-    local collection_name=$2
-    local book_name=$3
+    local book_name=$2
     
     log_info "Embedding $book_name..."
     log_info "  File: $chunk_file"
-    log_info "  Collection: $collection_name"
     
-    dnd-embed "$chunk_file" "$collection_name" || {
+    dnd-embed "$chunk_file" || {
         log_error "Failed to embed $book_name!"
         exit 1
     }
@@ -124,31 +133,33 @@ embed_book() {
 }
 
 verify_all_collections() {
-    log_info "Verifying all collections in ChromaCloud..."
+    log_info "Verifying unified collection in ChromaCloud..."
     
     dnd-rag collections || {
         log_error "Failed to list collections!"
         exit 1
     }
     
-    # Check that we have exactly 3 collections
-    local collection_count=$(python3 -c "
+    # Check that we have the adnd_1e collection
+    local collection_count
+    collection_count=$(python3 -c "
 from src.utils.chromadb_connector import ChromaDBConnector
 connector = ChromaDBConnector()
-print(len(connector.list_collections()))
+collections = [col.name for col in connector.list_collections()]
+print(len([c for c in collections if c == 'adnd_1e']))
 ")
     
-    if [ "$collection_count" != "3" ]; then
-        log_warning "Expected 3 collections, found $collection_count"
+    if [ "$collection_count" != "1" ]; then
+        log_warning "Expected adnd_1e collection, found $collection_count matching collections"
     else
-        log_success "All 3 collections verified!"
+        log_success "Unified collection 'adnd_1e' verified!"
     fi
 }
 
 test_sample_query() {
-    log_info "Testing sample query..."
+    log_info "Testing sample query against unified collection..."
     
-    dnd-query dnd_monster_manual "What is a beholder?" || {
+    dnd-query "What is a beholder?" || {
         log_warning "Sample query failed (this may be OK if just starting)"
     }
     
@@ -161,17 +172,18 @@ print_summary() {
     log_success "  Embedding Complete!"
     log_success "========================================="
     echo
-    log_info "Collections Created:"
-    echo "  • dnd_monster_manual (Monster Manual)"
-    echo "  • dnd_players_handbook (Player's Handbook)"
-    echo "  • dnd_dmg (Dungeon Master's Guide)"
+    log_info "Unified Collection Created:"
+    echo "  • adnd_1e (all 3 books combined)"
+    echo "    - Monster Manual"
+    echo "    - Player's Handbook"
+    echo "    - Dungeon Master's Guide (with query_must filters)"
     echo
     log_info "Next Steps:"
-    echo "  1. Verify collections: dnd-rag collections"
-    echo "  2. Test queries: dnd-query dnd_monster_manual \"What is a beholder?\""
+    echo "  1. Verify collection: dnd-rag collections"
+    echo "  2. Test queries: dnd-query \"What is a beholder?\""
     echo "  3. Deploy to production: ./scripts/deploy_to_production.sh dndchat.gravitycar.com your_user"
     echo
-    log_warning "IMPORTANT: Re-comment ChromaCloud credentials in .env if you want to use local ChromaDB again"
+    log_info "Collections are now in ChromaCloud and ready for production deployment"
     echo
 }
 
@@ -184,25 +196,28 @@ main() {
     # Step 2: Verify ChromaCloud connection
     verify_chromacloud_connection
     
+    # Get collection name from environment (default: adnd_1e)
+    COLLECTION_NAME="${default_collection_name:-adnd_1e}"
+    log_info "Target collection: $COLLECTION_NAME"
+    log_info "All books will be embedded into this unified collection"
+    echo
+    
     # Step 3: Embed Monster Manual
     embed_book \
         "data/chunks/chunks_Monster_Manual_(1e).json" \
-        "dnd_monster_manual" \
         "Monster Manual"
     
     # Step 4: Embed Player's Handbook
     embed_book \
         "data/chunks/chunks_Players_Handbook_(1e)_organized.json" \
-        "dnd_players_handbook" \
         "Player's Handbook"
     
-    # Step 5: Embed Dungeon Master's Guide
+    # Step 5: Embed Dungeon Master's Guide (with query_must metadata)
     embed_book \
         "data/chunks/chunks_DMG_with_query_must.json" \
-        "dnd_dmg" \
         "Dungeon Master's Guide"
     
-    # Step 6: Verify all collections
+    # Step 6: Verify collection
     verify_all_collections
     
     # Step 7: Test sample query
