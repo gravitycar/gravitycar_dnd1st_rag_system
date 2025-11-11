@@ -162,9 +162,8 @@ def embed_main():
     collection_name = get_default_collection_name()
     
     embedder = orchestrator.process(
-        chunk_file=str(chunks_file),
-        collection_name=collection_name,
-        truncate=False
+        str(chunks_file),
+        collection_name=collection_name
     )
     
     # Run test queries if requested

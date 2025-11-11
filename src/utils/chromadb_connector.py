@@ -176,15 +176,17 @@ class ChromaDBConnector:
         """
         self.client.delete_collection(name=name)
     
-    def truncate_collection(self, name: str) -> int:
+    def truncate_collection(self, name: str, batch_size: int = 500) -> int:
         """
         Empty a collection (delete all entries but keep collection).
         
         This is more efficient than delete + recreate when you want to
-        preserve the collection structure.
+        preserve the collection structure. Uses batching to avoid 
+        ChromaCloud request size limits.
         
         Args:
             name: Collection name
+            batch_size: Number of items to delete per batch (default: 500)
             
         Returns:
             Number of entries deleted
@@ -198,11 +200,28 @@ class ChromaDBConnector:
         if count_before == 0:
             return 0
         
-        # Get all IDs and delete them
-        # ChromaDB v2 API requires specific IDs, not an empty where clause
-        result = collection.get(limit=count_before)
-        if result and result['ids']:
+        # Delete in batches to avoid ChromaCloud limits
+        total_deleted = 0
+        
+        print(f"Truncating {count_before} items in batches of {batch_size}...")
+        
+        while True:
+            # Get a batch of IDs
+            result = collection.get(limit=batch_size)
+            
+            if not result or not result['ids']:
+                break
+            
+            # Delete this batch
             collection.delete(ids=result['ids'])
+            batch_count = len(result['ids'])
+            total_deleted += batch_count
+            
+            print(f"  Deleted {total_deleted}/{count_before} items...")
+            
+            # If we got fewer items than batch_size, we're done
+            if batch_count < batch_size:
+                break
         
         return count_before
     
