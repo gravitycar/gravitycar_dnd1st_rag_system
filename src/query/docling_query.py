@@ -450,7 +450,7 @@ class DnDRAG:
                 # These are educational/reference material that should always be available
                 is_reference = (metadata.get('type') == 'reference' and 
                                metadata.get('section') == 'EXPLANATORY NOTES')
-                
+                ""
                 # Check if chunk has query_must metadata (skip for reference chunks)
                 if 'query_must' in metadata and not is_reference:
                     try:
@@ -458,7 +458,7 @@ class DnDRAG:
                         query_must = json.loads(metadata['query_must']) if isinstance(metadata['query_must'], str) else metadata['query_must']
                         
                         # Check if query satisfies requirements
-                        if satisfies_query_must(query, query_must, debug=debug):
+                        if satisfies_query_must(query, query_must, debug=debug, output=self.output):
                             newly_kept.append({
                                 'id': chunk_id,
                                 'metadata': metadata,
