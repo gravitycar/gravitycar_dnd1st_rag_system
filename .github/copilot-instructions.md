@@ -243,7 +243,33 @@ The embedder system was refactored from a monolithic class into a modular archit
 
 See `docs/implementations/EmbedderArchitecture.md` for full details.
 
+### Markdown to HTML Conversion (November 2025)
+Flask API now automatically converts OpenAI's Markdown responses to HTML for web clients:
+
+**Old**: All clients received raw Markdown (required client-side conversion)  
+**New**: Format detection via User-Agent → Web clients get HTML, CLI clients get Markdown
+
+**Benefits**:
+- ✅ **Better Web Rendering**: Proper HTML for browser display
+- ✅ **Backwards Compatible**: CLI clients still receive Markdown
+- ✅ **Zero Breaking Changes**: Default behavior preserves Markdown
+- ✅ **Performance**: < 10ms conversion overhead
+
+**Key Components**:
+- `MarkdownConverter` (`src/utils/markdown_converter.py`): Converts Markdown → HTML
+- User-Agent detection: Browsers/React → HTML, curl/CLI → Markdown
+- New API field: `answer_format` indicates `"markdown"` or `"html"`
+
+**Format Detection**:
+- Web: Mozilla, Chrome, Safari, Edge, axios, fetch
+- CLI: curl, python-requests, httpie, wget, postman
+- Default: Markdown (backwards compatible)
+
+**Dependencies**: `markdown==3.5.1` (lightweight, 200KB)
+
+See `docs/implementations/MarkdownToHTMLConversion.md` for full details.
+
 ---
 
-*Last Updated: October 21, 2025*  
-*Version: 1.2 (ChromaDB Connector + Embedder Refactoring)*
+*Last Updated: November 19, 2025*  
+*Version: 1.3 (ChromaDB Connector + Embedder Refactoring + Markdown/HTML Conversion)*

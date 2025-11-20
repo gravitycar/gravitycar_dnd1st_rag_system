@@ -24,3 +24,4 @@ gunicorn==21.2.0
 python-dotenv==1.1.1
 
 # TOTAL SIZE: ~150-200 MB (vs 2+ GB with sentence-transformers)
+markdown==3.5.1

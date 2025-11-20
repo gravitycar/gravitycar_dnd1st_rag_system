@@ -671,7 +671,6 @@ Your role is to provide accurate, helpful answers based on the official rulebook
    - Then parse the object's properties to search for your answer.
    - Explain which properties you are using and why.
 4. When calculating combat probabilities:
-   - Explain which piece of context you're getting your numbers from.
    - Apply ALL relevant modifiers (strength "to hit" bonus, dexterity bonuses, etc.)
    - Modifiers REDUCE the required die roll (a +1 bonus means you need to roll 1 less)
 5. If information is not in the provided context, say so clearly
@@ -680,7 +679,7 @@ Your role is to provide accurate, helpful answers based on the official rulebook
 
 The context below comes from official AD&D 1st Edition rulebooks. Use this context AND ONLY this context to answer.
 
-IMPORTANT: you must only use the provided context to answer questions. If the context doesn't provide enough information, explain what might additional information you need.
+IMPORTANT: you must only use the provided context to answer questions. If the context doesn't provide enough information, explain what additional information you need.
 """
    
         user_prompt = f"""Context from D&D 1st Edition rulebooks:
