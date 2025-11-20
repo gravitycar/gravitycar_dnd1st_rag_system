@@ -21,6 +21,7 @@ from src.utils.token_validator import TokenValidator
 from src.utils.rate_limiter import TokenBucket
 from src.utils.cost_tracker import CostTracker
 from src.utils.config import get_env_float, get_env_int, get_env_string
+from src.utils.markdown_converter import MarkdownConverter
 
 # Note: These helpers will be added to existing src/utils/config.py
 
@@ -78,6 +79,9 @@ cost_tracker = CostTracker(
     alert_email=get_env_string('ALERT_EMAIL'),
     model=get_env_string('OPENAI_MODEL', 'gpt-4o-mini')  # Get model from config
 )
+
+# Initialize Markdown converter (singleton instance)
+markdown_converter = MarkdownConverter()
 
 # Initialize RAG system (lazy initialization on first query)
 rag = None
@@ -279,6 +283,23 @@ def query():
         # 6. Record costs
         cost_info = cost_tracker.record_query(user_id, prompt_tokens, completion_tokens)
         logger.info(f"Cost: ${cost_info['query_cost']:.6f} (daily total: ${cost_info['daily_cost']:.4f} / ${cost_info['daily_budget']:.2f})")
+        
+        # 6.5. Format detection and conversion (Markdown → HTML for web clients)
+        if markdown_converter.is_web_request(request):
+            # Convert Markdown to HTML for web clients
+            conversion_start = datetime.utcnow()
+            result['answer'] = markdown_converter.convert(result['answer'])
+            conversion_duration = (datetime.utcnow() - conversion_start).total_seconds()
+            result['answer_format'] = 'html'
+            
+            if debug:
+                logger.debug(f"Converted response to HTML for web client (User-Agent: {request.headers.get('User-Agent', 'unknown')}) in {conversion_duration*1000:.1f}ms")
+        else:
+            # Keep Markdown for CLI clients
+            result['answer_format'] = 'markdown'
+            
+            if debug:
+                logger.debug(f"Returning Markdown for CLI client (User-Agent: {request.headers.get('User-Agent', 'unknown')})")
         
         # 7. Add metadata to response
         request_duration = (datetime.utcnow() - request_start).total_seconds()

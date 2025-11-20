@@ -20,3 +20,4 @@ docling-parse==4.5.0
 # PDF Processing (optional/experimental)
 PyMuPDF==1.26.4
 pymupdf4llm==0.0.27
+markdown==3.5.1
